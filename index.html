@@ -1,0 +1,154 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#111827">
+  <title>Editor HTML móvil</title>
+  <style>
+    :root { color-scheme: dark; --bg:#0b1020; --panel:#151d2e; --panel2:#1d2940; --line:#2b3953; --text:#e8eef9; --muted:#9eacc4; --accent:#6ea8fe; --green:#31c48d; }
+    * { box-sizing:border-box; }
+    html { height:100%; background:var(--bg); -webkit-text-size-adjust:100%; }
+    body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+    button, input, textarea { font:inherit; }
+    button { min-height:44px; border:1px solid var(--line); border-radius:11px; padding:10px 13px; color:var(--text); background:var(--panel2); font-weight:600; cursor:pointer; touch-action:manipulation; }
+    button.primary { background:var(--accent); border-color:var(--accent); color:#071326; }
+    button:active { transform:scale(.98); }
+    header { position:sticky; top:0; z-index:5; padding:calc(12px + env(safe-area-inset-top)) 14px 12px; background:#111827f2; border-bottom:1px solid var(--line); backdrop-filter:blur(12px); }
+    .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
+    h1 { margin:0; font-size:18px; letter-spacing:.2px; }
+    .sub { margin-top:4px; color:var(--muted); font-size:12px; }
+    main { max-width:1000px; margin:auto; padding:12px; padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
+    .toolbar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
+    .toolbar button { flex:1 1 auto; }
+    .file-label { display:flex; align-items:center; justify-content:center; min-height:44px; padding:10px 13px; border:1px solid var(--line); border-radius:11px; background:var(--panel2); font-weight:600; flex:1 1 auto; cursor:pointer; }
+    #fileInput { display:none; }
+    .status { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:12px; padding:2px 2px 9px; }
+    .editor-wrap { overflow:hidden; border:1px solid var(--line); border-radius:13px; background:#080d18; }
+    .editor-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--panel); border-bottom:1px solid var(--line); color:var(--muted); font-size:12px; }
+    #code { display:block; width:100%; min-height:56vh; height:62vh; max-height:75vh; resize:vertical; border:0; outline:0; border-radius:0; padding:14px; background:#080d18; color:#d8e5ff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:16px; line-height:1.55; tab-size:2; white-space:pre; overflow:auto; -webkit-appearance:none; appearance:none; touch-action:pan-x pan-y; }
+    #code:focus { outline:2px solid #6ea8fe55; outline-offset:-2px; }
+    .hint { color:var(--muted); font-size:12px; line-height:1.5; margin:10px 2px 14px; }
+    .preview-box { margin-top:14px; border:1px solid var(--line); border-radius:13px; overflow:hidden; background:white; }
+    .preview-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--panel); color:var(--text); font-size:13px; }
+    iframe { display:block; width:100%; height:55vh; border:0; background:white; }
+    .hidden { display:none; }
+    .toast { position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:10; background:#26354d; color:white; border:1px solid #405574; border-radius:12px; padding:11px 15px; font-size:13px; box-shadow:0 8px 30px #0008; max-width:90%; text-align:center; }
+    @media (min-width:760px) { main { padding:20px; } #code { height:65vh; } .workspace { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; } .preview-box { margin-top:0; } iframe { height:70vh; } }
+  </style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <div>
+      <h1>Editor HTML móvil</h1>
+      <div class="sub">Abre, edita y descarga tu archivo como index.html</div>
+    </div>
+    <button id="clearBtn" type="button" title="Limpiar editor">Limpiar</button>
+  </div>
+</header>
+<main>
+  <div class="toolbar">
+    <label class="file-label" for="fileInput">＋ Abrir TXT / HTML</label>
+    <input id="fileInput" type="file" accept=".txt,.html,.htm,text/plain,text/html">
+    <button id="downloadBtn" class="primary" type="button">↓ Descargar index.html</button>
+    <button id="previewBtn" type="button">▶ Vista previa</button>
+  </div>
+  <div class="status"><span id="fileName">Sin archivo abierto</span><span id="count">0 líneas</span></div>
+  <div class="workspace">
+    <section class="editor-wrap">
+      <div class="editor-head"><span>⌘ Código fuente</span><span>HTML · CSS · JS</span></div>
+      <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Editor de código" placeholder="Abre un archivo TXT o HTML, o escribe/pega aquí tu código..."></textarea>
+    </section>
+    <section id="previewSection" class="preview-box hidden">
+      <div class="preview-head"><strong>Vista previa</strong><button id="refreshBtn" type="button">Actualizar</button></div>
+      <iframe id="preview" title="Vista previa de tu página" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+    </section>
+  </div>
+  <p class="hint">Consejo para iPhone: el editor usa texto de 16 px o más para evitar que Safari haga zoom al tocarlo. Si el teclado tapa parte del código, desplázate dentro del editor. Tu archivo original no se modifica; la descarga crea una copia llamada <b>index.html</b>.</p>
+</main>
+<div id="toast" class="toast hidden" role="status"></div>
+<script>
+(() => {
+  const code = document.getElementById('code');
+  const fileInput = document.getElementById('fileInput');
+  const fileName = document.getElementById('fileName');
+  const count = document.getElementById('count');
+  const preview = document.getElementById('preview');
+  const previewSection = document.getElementById('previewSection');
+  const toast = document.getElementById('toast');
+  let toastTimer;
+
+  function notify(message) {
+    toast.textContent = message;
+    toast.classList.remove('hidden');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toast.classList.add('hidden'), 2400);
+  }
+  function updateCount() {
+    const lines = code.value.length ? code.value.split('\n').length : 0;
+    count.textContent = `${lines} líneas · ${code.value.length} caracteres`;
+  }
+  function renderPreview() {
+    preview.srcdoc = code.value || '<!doctype html><html lang="es"><body style="font-family:system-ui;padding:24px;color:#333">La vista previa aparecerá aquí.</body></html>';
+    previewSection.classList.remove('hidden');
+    document.getElementById('previewBtn').textContent = 'Ocultar vista previa';
+  }
+  code.addEventListener('input', updateCount);
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files && fileInput.files[0];
+    if (!file) return;
+    try {
+      code.value = await file.text();
+      fileName.textContent = file.name;
+      updateCount();
+      notify('Archivo cargado. Ya puedes editarlo.');
+    } catch (e) {
+      notify('No se pudo leer ese archivo.');
+    }
+    fileInput.value = '';
+  });
+
+  document.getElementById('downloadBtn').addEventListener('click', () => {
+    const blob = new Blob([code.value], {type:'text/html;charset=utf-8'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'index.html';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1500);
+    notify('Preparando descarga de index.html');
+  });
+
+  document.getElementById('previewBtn').addEventListener('click', () => {
+    if (previewSection.classList.contains('hidden')) renderPreview();
+    else {
+      previewSection.classList.add('hidden');
+      document.getElementById('previewBtn').textContent = '▶ Vista previa';
+    }
+  });
+  document.getElementById('refreshBtn').addEventListener('click', renderPreview);
+  document.getElementById('clearBtn').addEventListener('click', () => {
+    if (!code.value || confirm('¿Borrar todo el contenido del editor?')) {
+      code.value = '';
+      fileName.textContent = 'Sin archivo abierto';
+      updateCount();
+      notify('Editor limpio.');
+    }
+  });
+
+  // Evita gestos de zoom accidentales en iOS; el desplazamiento normal sigue habilitado.
+  document.addEventListener('gesturestart', e => e.preventDefault(), {passive:false});
+  document.addEventListener('gesturechange', e => e.preventDefault(), {passive:false});
+  document.addEventListener('gestureend', e => e.preventDefault(), {passive:false});
+  document.addEventListener('touchmove', e => {
+    if (e.touches && e.touches.length > 1) e.preventDefault();
+  }, {passive:false});
+  updateCount();
+})();
+</script>
+</body>
+</html>
