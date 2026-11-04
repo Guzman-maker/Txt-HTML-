@@ -25,7 +25,7 @@ main{max-width:1200px;margin:auto;padding:12px;padding-bottom:calc(24px + env(sa
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 .toolbar button,.file-label{flex:1 1 auto}
 .file-label{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:11px;background:var(--panel2);font-weight:600;cursor:pointer}
-#fileInput,#dirInput{display:none}
+#fileInput{display:none}
 .status{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;padding:2px 2px 9px}
 .editor-wrap{position:relative}
 .editor-wrap,.panel{overflow:hidden;border:1px solid var(--line);border-radius:13px;background:#080d18}
@@ -51,6 +51,17 @@ iframe{flex:1;width:100%;border:0;background:#fff}
 #tips{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
 #tips li{padding:10px;border-radius:9px;font-size:14px;cursor:pointer;border-left:3px solid var(--yel);margin-bottom:6px;background:var(--panel)}
 #tips li.err{border-color:var(--red)}#tips li.info{border-color:var(--accent)}
+.sheet{position:fixed;inset:0;z-index:55;background:#000b;display:flex;align-items:flex-end;justify-content:center}
+.card{width:100%;max-width:560px;max-height:88vh;overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:16px 16px 0 0;padding:16px 16px calc(16px + env(safe-area-inset-bottom))}
+.card h2{margin:0 0 6px;font-size:17px}
+.dl-row{display:flex;align-items:center;gap:10px;padding:10px 0;border-bottom:1px solid var(--line)}
+.dl-row div{flex:1;min-width:0;word-break:break-word}
+.dl-row small{display:block;color:var(--muted);margin-top:2px}
+.dl-row button{flex:none;width:52px}
+.mut{color:var(--muted);font-size:13px;margin:14px 0 6px}
+#dlTree{margin:0 0 12px;padding:10px;background:#080d18;border:1px solid var(--line);border-radius:10px;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;overflow:auto;max-height:22vh}
+.row{display:flex;gap:8px;margin-bottom:8px}.row button{flex:1}
+button.wide{width:100%}
 .hidden{display:none!important}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:60;background:#26354d;color:#fff;border:1px solid #405574;border-radius:12px;padding:11px 15px;font-size:13px;max-width:90%;text-align:center}
 @media(min-width:900px){main{padding:20px}.workspace{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.panel{margin-top:0}#code,#imgv,.pane{height:68vh}}
@@ -60,7 +71,6 @@ iframe{flex:1;width:100%;border:0;background:#fff}
 <header>
   <div class="top">
     <div><h1>Editor de código</h1><div class="sub" id="fileName"></div></div>
-    <button id="newBtn" type="button">＋ Nuevo</button>
   </div>
 </header>
 <main>
@@ -68,10 +78,7 @@ iframe{flex:1;width:100%;border:0;background:#fff}
   <div class="toolbar">
     <label class="file-label" for="fileInput">Abrir</label>
     <input id="fileInput" type="file" multiple>
-    <label class="file-label" for="dirInput">Carpeta</label>
-    <input id="dirInput" type="file" webkitdirectory multiple>
-    <button id="dlBtn" class="primary" type="button">↓ Archivo</button>
-    <button id="zipBtn" type="button">↓ ZIP</button>
+    <button id="dlBtn" class="primary" type="button">↓ Descargar</button>
     <button id="runBtn" type="button">▶ Ejecutar</button>
     <button id="renBtn" type="button">Renombrar</button>
     <button id="delBtn" type="button">Borrar</button>
@@ -101,6 +108,18 @@ iframe{flex:1;width:100%;border:0;background:#fff}
     </section>
   </div>
 </main>
+<div id="dlSheet" class="sheet hidden">
+  <div class="card" role="dialog" aria-label="Descargar">
+    <h2>Descargar</h2>
+    <div id="dlList"></div>
+    <div id="dlZips">
+      <p class="mut">El ZIP ordenado separa el proyecto así:</p>
+      <pre id="dlTree"></pre>
+      <div class="row"><button id="zipOrd" class="primary" type="button">↓ ZIP ordenado</button><button id="zipRaw" type="button">↓ ZIP sin ordenar</button></div>
+    </div>
+    <button id="dlClose" class="wide" type="button">Cerrar</button>
+  </div>
+</div>
 <div id="toast" class="toast hidden" role="status"></div>
 <script>
 (() => {
@@ -143,12 +162,19 @@ function zip(list) {
 const ext = n => { const m = n.match(/\.(\w+)$/); return m ? m[1].toLowerCase() : ''; };
 function detect(c) {
   if (!c.trim()) return '';
-  if (/<!doctype|<html|<body|<head|<style|<script|<div|<span|<h1|<ul/i.test(c)) return 'html';
-  if (/\bSystem\.out\.|^\s*(public\s+)?(class|interface)\s+\w+/m.test(c) && /;\s*$/m.test(c)) return 'java';
-  if (/^\s*(def\s|from\s+\w+\s+import|import\s+\w+\s*$|print\(|if\s+__name__)/m.test(c) && !/;\s*$/m.test(c)) return 'py';
-  if (/[\w.#\]-]\s*\{[^}]*:[^}]*;/.test(c) && !/function|=>|\b(const|let|var)\b/.test(c)) return 'css';
-  if (/\b(const|let|var|function)\s+\w|=>|console\.|document\.|require\(|^\s*(import|export)\s/m.test(c)) return 'js';
-  return '';
+  if (/^\s*<(!doctype|!--|[a-z][\w-]*[\s>\/])/i.test(c)) return 'html';
+  const sc = {java:0, py:0, js:0, css:0}, t = (re, k, n) => { if (re.test(c)) sc[k] += n; };
+  t(/\bSystem\.out\./, 'java', 3); t(/^\s*(public|private)\s+(static\s+)?(class|void|int|String)\b/m, 'java', 3);
+  t(/^\s*package\s+[\w.]+;/m, 'java', 2); t(/^\s*import\s+java\./m, 'java', 3);
+  t(/^\s*def\s+\w+\s*\(.*\)\s*(->.*)?:\s*$/m, 'py', 3); t(/^\s*class\s+\w+(\(.*\))?\s*:\s*$/m, 'py', 3);
+  t(/^\s*(from\s+[\w.]+\s+import\s|import\s+[\w.]+(\s+as\s+\w+)?\s*$)/m, 'py', 2); t(/\bprint\s*\(/, 'py', 1);
+  t(/^\s*if\s+__name__\s*==/m, 'py', 3); t(/^\s*(elif|else|except|try|finally|with)\b.*:\s*$/m, 'py', 2);
+  t(/^\s*for\s+\w+(\s*,\s*\w+)*\s+in\s+.+:\s*$/m, 'py', 2); t(/\bself\./, 'py', 1); t(/^\s*#\s/m, 'py', 1);
+  t(/\b(const|let|var)\s+\w+\s*=/, 'js', 2); t(/\bfunction\b/, 'js', 2); t(/=>/, 'js', 2);
+  t(/\b(console|document|window)\./, 'js', 3); t(/\brequire\(|^\s*(import|export)\s.*from\s/m, 'js', 3);
+  t(/(^|[}\s])[.#]?[\w-]+(\s*[,>+~]\s*[.#]?[\w-]+)*\s*\{[^{}]*:[^{}]*\}/, 'css', 3); t(/@(media|import|font-face|keyframes)\b/, 'css', 3);
+  const best = Object.keys(sc).sort((a, b) => sc[b] - sc[a])[0];
+  return sc[best] >= 2 ? best : '';
 }
 const kind = f => { const e = ext(f.name); if (e && e !== 'txt') return EXT[e] || e; return detect(f.content) || 'txt'; };
 const DEF = {css:'style', js:'script', py:'main'};
@@ -170,6 +196,7 @@ try { localStorage.removeItem('ed'); } catch (_) {}
 files = [{name:'sin-titulo', content:''}];
 addEventListener('beforeunload', e => { if (files.some(f => f.content)) { e.preventDefault(); e.returnValue = ''; } });
 addEventListener('error', e => log('Error: ' + e.message, 'err'));
+addEventListener('unhandledrejection', e => log('Error: ' + ((e.reason && e.reason.message) || e.reason), 'err'));
 const saveD = deb(save, 300);
 function note(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 2400); }
 function head() {
@@ -256,6 +283,25 @@ function dlZip(raw) {
   note('Descargando proyecto.zip (' + list.length + ' archivos' + (raw ? '' : ', ordenado') + ')');
 }
 
+const fmt = n => n < 1024 ? n + ' B' : (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
+function openDl() {
+  const list = files.filter(f => f.bytes || f.content.trim()), box = $('dlList');
+  $('dlZips').classList.toggle('hidden', !list.length);
+  if (!list.length) { const p = document.createElement('p'); p.className = 'mut'; p.textContent = 'Todavía no hay contenido. Escribe código o abre un archivo.'; box.replaceChildren(p); }
+  else {
+    box.replaceChildren(...list.map(f => {
+      const row = document.createElement('div'), txt = document.createElement('div'), nm = document.createElement('b'), info = document.createElement('small'), btn = document.createElement('button');
+      const fn = fname(f).split('/').pop(), size = f.bytes ? f.bytes.length : new TextEncoder().encode(f.content).length;
+      row.className = 'dl-row'; nm.textContent = fn;
+      info.textContent = (f.data ? 'Imagen' : LANG[kind(f)] || kind(f).toUpperCase()) + ' · ' + fmt(size) + (fn !== f.name.split('/').pop() ? ' · antes: ' + f.name : '');
+      btn.type = 'button'; btn.textContent = '↓'; btn.setAttribute('aria-label', 'Descargar ' + fn); btn.onclick = () => dlFile(f);
+      txt.append(nm, info); row.append(txt, btn); return row;
+    }));
+    $('dlTree').textContent = organize().map(x => x.name).join('\n');
+  }
+  $('dlSheet').classList.remove('hidden');
+}
+const closeDl = () => $('dlSheet').classList.add('hidden');
 // ---------- Consejos (análisis estático básico) ----------
 function brackets(c, k) {
   const st = [], pr = {')':'(', ']':'[', '}':'{'}; let line = 1, q = '';
@@ -275,6 +321,8 @@ function lint(f) {
   const add = (l, m, s = 'warn') => { if (t.length < 40) t.push({l, m, k:s}); };
   const each = (re, m, s) => L.forEach((x, i) => { if (re.test(x)) add(i + 1, m, s); });
   if (!c.trim()) return t;
+  const dk = detect(c);
+  if (ext(f.name) && ext(f.name) !== 'txt' && ['html', 'py', 'java'].includes(dk) && dk !== k) add(1, 'El contenido parece ' + LANG[dk] + ' pero el archivo es ' + (LANG[k] || k) + '; usa Renombrar para cambiarle la extensión.', 'err');
   if (['html', 'css', 'js', 'py', 'java'].includes(k)) { const bk = brackets(c, k); if (bk) add(bk.line, 'Posible error: ' + bk.msg + '.', 'err'); }
   if (k === 'html') {
     if (!/<!doctype html/i.test(c)) add(1, 'Falta <!DOCTYPE html> al inicio.');
@@ -376,7 +424,7 @@ async function pyInit() {
   log('Cargando Python (Pyodide, ~10 MB, solo la primera vez)…');
   await new Promise((ok, no) => {
     const s = document.createElement('script'); s.src = PY + 'pyodide.js'; s.onload = ok;
-    s.onerror = () => no(new Error('No se pudo descargar Pyodide (¿sin internet?).')); document.head.appendChild(s);
+    s.onerror = () => no(new Error('No se pudo cargar Python (Pyodide). Necesita internet y abrir esta página en Safari o Chrome; en visores o vistas previas con restricciones no carga.')); document.head.appendChild(s);
   });
   py = await loadPyodide({indexURL:PY, stdout:m => log(m), stderr:m => log(m, 'err')});
   return py;
@@ -403,7 +451,8 @@ function npm(a) {
   else if (['rm', 'uninstall'].includes(a[0])) { deps = deps.filter(x => !n.includes(x)); save(); log('Quitado.'); }
   else log('Uso: npm install <paquete> | npm ls | npm rm <paquete>', 'err');
 }
-async function run(n) {
+async function run(n) { try { await run_(n); } catch (e) { show('term'); log(String(e.message || e), 'err'); } }
+async function run_(n) {
   const f = n ? find(n) : file();
   if (!f) return log('No existe: ' + n, 'err');
   if (f.data) { show('prev'); prev.srcdoc = '<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%">'; return; }
@@ -458,7 +507,6 @@ code.addEventListener('input', () => { file().content = code.value; saveD(); hea
 code.addEventListener('scroll', () => { $('gut').scrollTop = code.scrollTop; });
 
 // ---------- Botones ----------
-$('newBtn').onclick = () => { const n = prompt('Nombre del archivo (ej. main.py, css/estilo.css)'); if (n) add(n); };
 async function load(list) {
   const msgs = [], blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content;
   for (const f of list) {
@@ -478,9 +526,12 @@ async function load(list) {
   note(msgs.length ? msgs.join(' · ') : 'Archivos cargados');
 }
 $('fileInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
-$('dirInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
-$('dlBtn').onclick = () => dlFile(file());
-$('zipBtn').onclick = () => dlZip();
+$('dlBtn').onclick = openDl;
+$('dlClose').onclick = closeDl;
+$('zipOrd').onclick = () => dlZip();
+$('zipRaw').onclick = () => dlZip(true);
+$('dlSheet').onclick = e => { if (e.target === $('dlSheet')) closeDl(); };
+addEventListener('keydown', e => { if (e.key === 'Escape') closeDl(); });
 $('runBtn').onclick = () => run();
 $('renBtn').onclick = () => { const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
 $('delBtn').onclick = () => {
