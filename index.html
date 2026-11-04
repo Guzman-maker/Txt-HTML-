@@ -41,6 +41,7 @@ iframe{flex:1;width:100%;border:0;background:#fff}
 #out{flex:1;overflow:auto;padding:10px;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
 #out .err{color:var(--red)}#out .cmd{color:var(--accent)}
 .tin{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--line);background:var(--panel);font-family:ui-monospace,Menlo,monospace}
+.tin button{min-height:36px;padding:4px 12px}
 #cmd{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--text);font-size:16px;font-family:inherit}
 #tips{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
 #tips li{padding:10px;border-radius:9px;font-size:14px;cursor:pointer;border-left:3px solid var(--yel);margin-bottom:6px;background:var(--panel)}
@@ -85,7 +86,7 @@ iframe{flex:1;width:100%;border:0;background:#fff}
       </div>
       <div id="p-term" class="pane hidden">
         <div id="out"></div>
-        <div class="tin"><span>$</span><input id="cmd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="help" aria-label="Comando"></div>
+        <form id="tf" class="tin"><span>$</span><input id="cmd" enterkeyhint="go" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="help" aria-label="Comando"><button type="submit">Enter</button></form>
       </div>
       <div id="p-tips" class="pane hidden"><ul id="tips"></ul></div>
     </section>
@@ -131,31 +132,32 @@ function zip(list) {
 // ---------- Detección de lenguaje ----------
 const ext = n => { const m = n.match(/\.(\w+)$/); return m ? m[1].toLowerCase() : ''; };
 function detect(c) {
-  if (/<!doctype|<html|<body|<div|<h1/i.test(c)) return 'html';
-  if (/\bSystem\.out\.|^\s*(public\s+)?class\s+\w+/m.test(c) && /;\s*$/m.test(c)) return 'java';
-  if (/^\s*(def\s|from\s+\w+\s+import|import\s+\w+\s*$|print\()/m.test(c) && !/;\s*$/m.test(c)) return 'py';
+  if (!c.trim()) return '';
+  if (/<!doctype|<html|<body|<head|<style|<script|<div|<span|<h1|<ul/i.test(c)) return 'html';
+  if (/\bSystem\.out\.|^\s*(public\s+)?(class|interface)\s+\w+/m.test(c) && /;\s*$/m.test(c)) return 'java';
+  if (/^\s*(def\s|from\s+\w+\s+import|import\s+\w+\s*$|print\(|if\s+__name__)/m.test(c) && !/;\s*$/m.test(c)) return 'py';
   if (/[\w.#\]-]\s*\{[^}]*:[^}]*;/.test(c) && !/function|=>|\b(const|let|var)\b/.test(c)) return 'css';
-  return 'js';
+  if (/\b(const|let|var|function)\s+\w|=>|console\.|document\.|require\(|^\s*(import|export)\s/m.test(c)) return 'js';
+  return '';
 }
-const kind = f => { const e = ext(f.name); return e ? (EXT[e] || e) : detect(f.content); };
-const fname = f => ext(f.name) ? f.name : f.name + '.' + kind(f);
+const kind = f => { const e = ext(f.name); if (e && e !== 'txt') return EXT[e] || e; return detect(f.content) || 'txt'; };
+const fname = f => { const e = ext(f.name); if (e && e !== 'txt') return f.name; return (e ? f.name.replace(/\.txt$/i, '') : f.name) + '.' + kind(f); };
 const file = () => files[cur];
 const find = n => files.find(f => f.name === n);
 const clean = n => (n || '').replace(/[\/\\]/g, '_').trim();
 
 // ---------- Estado ----------
-const save = () => { try { localStorage.setItem('ed', JSON.stringify({files, cur, deps})); } catch (_) {} };
-try {
-  const s = JSON.parse(localStorage.getItem('ed'));
-  if (s && s.files && s.files.length) { files = s.files; cur = Math.min(s.cur | 0, files.length - 1); deps = s.deps || []; }
-} catch (_) {}
-if (!files.length) files = [{name:'index.html', content:''}];
+const save = () => {};
+try { localStorage.removeItem('ed'); } catch (_) {}
+files = [{name:'sin-titulo', content:''}];
+addEventListener('beforeunload', e => { if (files.some(f => f.content)) { e.preventDefault(); e.returnValue = ''; } });
+addEventListener('error', e => log('Error: ' + e.message, 'err'));
 const saveD = deb(save, 300);
 function note(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 2400); }
 function head() {
   const f = file(), k = kind(f);
   $('fileName').textContent = fname(f);
-  $('lang').textContent = LANG[k] || k.toUpperCase();
+  $('lang').textContent = (!ext(f.name) || ext(f.name) === 'txt') && !code.value.trim() ? 'Detectando…' : (LANG[k] || k.toUpperCase());
   const n = code.value ? code.value.split('\n').length : 0;
   $('count').textContent = n + ' líneas · ' + code.value.length + ' caracteres';
 }
@@ -325,7 +327,7 @@ async function run(n) {
   else if (k === 'js') { show('term'); runJS(f.content); }
   else if (k === 'py') { show('term'); await runPy(f); }
   else if (k === 'java') { show('term'); log('Java no se puede ejecutar en el navegador. Descárgalo y compílalo con: javac ' + f.name, 'err'); }
-  else { show('term'); log('No sé ejecutar archivos .' + k, 'err'); }
+  else { show('term'); log(k === 'txt' ? 'No detecté el tipo de código en este archivo.' : 'No sé ejecutar archivos .' + k, 'err'); }
 }
 async function exec(line) {
   log('$ ' + line, 'cmd');
@@ -372,8 +374,15 @@ code.addEventListener('input', () => { file().content = code.value; saveD(); hea
 // ---------- Botones ----------
 $('newBtn').onclick = () => { const n = prompt('Nombre del archivo (ej. main.py, Main.java, style.css)'); if (n) add(n); };
 $('fileInput').onchange = async e => {
-  for (const f of e.target.files) { try { add(f.name, await f.text()); } catch (_) { note('No se pudo leer ' + f.name); } }
-  e.target.value = ''; note('Archivos cargados');
+  const msgs = [];
+  for (const f of e.target.files) {
+    try {
+      let n = f.name; const c = await f.text(), d = (!ext(n) || ext(n) === 'txt') ? detect(c) : '';
+      if (d) { n = n.replace(/\.txt$/i, '') + '.' + d; msgs.push(f.name + ' → ' + n); }
+      add(n, c);
+    } catch (_) { msgs.push('No se pudo leer ' + f.name); }
+  }
+  e.target.value = ''; note(msgs.length ? 'Detectado: ' + msgs.join(' · ') : 'Archivos cargados');
 };
 $('dlBtn').onclick = () => dlFile(file());
 $('zipBtn').onclick = dlZip;
@@ -386,7 +395,7 @@ $('delBtn').onclick = () => {
 document.querySelectorAll('.ptabs button').forEach(b => b.onclick = () => show(b.dataset.p));
 $('refBtn').onclick = () => refresh();
 $('fullBtn').onclick = () => { const f = $('p-prev').classList.toggle('full'); $('fullBtn').textContent = f ? '✕ Cerrar' : '⤢ Ver completa'; };
-cmd.addEventListener('keydown', e => { if (e.key === 'Enter') { const l = cmd.value; cmd.value = ''; exec(l); } });
+$('tf').onsubmit = e => { e.preventDefault(); const l = cmd.value; cmd.value = ''; exec(l); };
 
 // Evita zoom accidental en iOS
 ['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), {passive:false}));
