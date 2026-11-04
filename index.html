@@ -568,7 +568,7 @@ async function runPy(f) {
       '        raise EOFError("Entrada cancelada")',
       '    return str(value)',
       'builtins.input = _editor_input'
-    ].join('\\n'));
+    ].join('\n'));
     await p.runPythonAsync(f.content);
     log('✓ Ejecución terminada.');
   } catch (e) {
