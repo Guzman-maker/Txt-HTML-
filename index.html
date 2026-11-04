@@ -131,7 +131,7 @@ const MIME = {html:'text/html', css:'text/css', js:'text/javascript', json:'appl
 const IMG = {png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', bmp:'image/bmp', ico:'image/x-icon', avif:'image/avif'};
 const PY = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 const PAIR = {'(':')', '[':']', '{':'}', '"':'"', "'":"'", '`':'`'};
-let files = [], cur = 0, deps = [], py, runner, toastT, marks = {}, gutN = 0;
+let files = [], cur = 0, deps = [], py, pyLoading, runner, toastT, marks = {}, gutN = 0;
 const deb = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 // ---------- ZIP (sin librerías) ----------
@@ -167,7 +167,7 @@ function detect(c) {
   t(/\bSystem\.out\./, 'java', 3); t(/^\s*(public|private)\s+(static\s+)?(class|void|int|String)\b/m, 'java', 3);
   t(/^\s*package\s+[\w.]+;/m, 'java', 2); t(/^\s*import\s+java\./m, 'java', 3);
   t(/^\s*def\s+\w+\s*\(.*\)\s*(->.*)?:\s*$/m, 'py', 3); t(/^\s*class\s+\w+(\(.*\))?\s*:\s*$/m, 'py', 3);
-  t(/^\s*(from\s+[\w.]+\s+import\s|import\s+[\w.]+(\s+as\s+\w+)?\s*$)/m, 'py', 2); t(/\bprint\s*\(/, 'py', 1);
+  t(/^\s*(from\s+[\w.]+\s+import\s|import\s+[\w.]+(\s+as\s+\w+)?\s*$)/m, 'py', 2); t(/\bprint\s*\(/, 'py', 2);
   t(/^\s*if\s+__name__\s*==/m, 'py', 3); t(/^\s*(elif|else|except|try|finally|with)\b.*:\s*$/m, 'py', 2);
   t(/^\s*for\s+\w+(\s*,\s*\w+)*\s+in\s+.+:\s*$/m, 'py', 2); t(/\bself\./, 'py', 1); t(/^\s*#\s/m, 'py', 1);
   t(/\b(const|let|var)\s+\w+\s*=/, 'js', 2); t(/\bfunction\b/, 'js', 2); t(/=>/, 'js', 2);
@@ -421,18 +421,53 @@ function runJS(c) {
 }
 async function pyInit() {
   if (py) return py;
-  log('Cargando Python (Pyodide, ~10 MB, solo la primera vez)…');
-  await new Promise((ok, no) => {
-    const s = document.createElement('script'); s.src = PY + 'pyodide.js'; s.onload = ok;
-    s.onerror = () => no(new Error('No se pudo cargar Python (Pyodide). Necesita internet y abrir esta página en Safari o Chrome; en visores o vistas previas con restricciones no carga.')); document.head.appendChild(s);
-  });
-  py = await loadPyodide({indexURL:PY, stdout:m => log(m), stderr:m => log(m, 'err')});
-  return py;
+  if (pyLoading) return pyLoading;
+  pyLoading = (async () => {
+    log('Cargando Python (Pyodide, ~10 MB, solo la primera vez)…');
+    if (typeof loadPyodide !== 'function') {
+      await new Promise((ok, no) => {
+        const s = document.createElement('script');
+        s.src = PY + 'pyodide.js';
+        s.onload = ok;
+        s.onerror = () => no(new Error('No se pudo cargar Pyodide. Comprueba tu conexión y abre el HTML en Safari o Chrome, no dentro de una vista previa restringida.'));
+        document.head.appendChild(s);
+      });
+    }
+    if (typeof loadPyodide !== 'function') throw new Error('Pyodide se descargó, pero loadPyodide no está disponible.');
+    py = await loadPyodide({
+      indexURL: PY,
+      stdout: m => log(m),
+      stderr: m => log(m, 'err')
+    });
+    log('✓ Python listo.');
+    return py;
+  })();
+  try { return await pyLoading; }
+  finally { pyLoading = null; }
 }
 async function runPy(f) {
   const p = await pyInit();
-  files.filter(x => kind(x) === 'py').forEach(x => { try { p.FS.writeFile(x.name, x.content); } catch (_) {} });
-  try { await p.runPythonAsync(f.content); } catch (e) { log(String(e.message).trim().split('\n').slice(-6).join('\n'), 'err'); }
+  // Copia los archivos .py del proyecto al sistema de archivos virtual de Pyodide.
+  files.filter(x => kind(x) === 'py').forEach(x => {
+    try {
+      const name = clean(x.name);
+      const parts = name.split('/');
+      if (parts.length > 1) {
+        let dir = '';
+        parts.slice(0, -1).forEach(part => {
+          dir += (dir ? '/' : '') + part;
+          try { p.FS.mkdir(dir); } catch (_) {}
+        });
+      }
+      p.FS.writeFile(name, x.content);
+    } catch (e) { log('No se pudo preparar ' + x.name + ': ' + e.message, 'err'); }
+  });
+  try {
+    await p.runPythonAsync(f.content);
+    log('✓ Ejecución terminada.');
+  } catch (e) {
+    log(String(e.message || e).trim().split('\n').slice(-8).join('\n'), 'err');
+  }
 }
 async function pip(a) {
   const p = await pyInit(); await p.loadPackage('micropip');
