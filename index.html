@@ -116,6 +116,8 @@ button.wide{width:100%}
       <p class="mut">El ZIP ordenado separa el proyecto así:</p>
       <pre id="dlTree"></pre>
       <div class="row"><button id="zipOrd" class="primary" type="button">↓ ZIP ordenado</button><button id="zipRaw" type="button">↓ ZIP sin ordenar</button></div>
+      <button id="exeZip" class="wide" type="button" style="margin-top:8px">↓ Preparar proyecto para crear .exe (Windows)</button>
+      <p class="mut">El paquete incluye los archivos del proyecto y un script para compilar el programa en Windows con PyInstaller.</p>
     </div>
     <button id="dlClose" class="wide" type="button">Cerrar</button>
   </div>
@@ -275,6 +277,97 @@ function organize() {
     return {name:p, content:c, bytes:f.bytes};
   });
 }
+
+function dlExePackage() {
+  const pyFiles = files.filter(f => !f.data && kind(f) === 'py' && f.content.trim());
+  if (!pyFiles.length) return note('Agrega al menos un archivo .py para preparar el .exe');
+
+  const entry = file();
+  const main = !entry.data && kind(entry) === 'py' && entry.content.trim()
+    ? fname(entry)
+    : fname(pyFiles[0]);
+  const base = main.split('/').pop().replace(/\.py$/i, '').replace(/[^\w.-]/g, '_') || 'programa';
+  const quoteBat = s => '"' + String(s).replace(/%/g, '%%').replace(/"/g, '') + '"';
+  const items = files.filter(f => f.bytes || f.content.trim()).map(f => ({
+    name: fname(f),
+    content: f.content,
+    bytes: f.bytes
+  }));
+
+  if (!items.some(x => x.name.toLowerCase() === 'requirements.txt')) {
+    items.push({
+      name: 'requirements.txt',
+      content: '# Agrega aquí las dependencias externas de tu programa, una por línea.\n'
+    });
+  }
+
+  const bat = [
+    '@echo off',
+    'chcp 65001 >nul',
+    'title Compilar ' + base,
+    'cd /d "%~dp0"',
+    'echo ========================================',
+    'echo   Compilador de programa Python a EXE',
+    'echo ========================================',
+    'where py >nul 2>nul',
+    'if errorlevel 1 (',
+    '  echo No se encontro el lanzador "py" de Python.',
+    '  echo Instala Python 3 desde https://www.python.org/downloads/windows/',
+    '  echo Activa la opcion "Add Python to PATH" durante la instalacion.',
+    '  pause',
+    '  exit /b 1',
+    ')',
+    'py -3 -m venv .venv',
+    'if errorlevel 1 goto error',
+    'call .venv\\Scripts\\activate.bat',
+    'python -m pip install --upgrade pip',
+    'if errorlevel 1 goto error',
+    'python -m pip install pyinstaller',
+    'if errorlevel 1 goto error',
+    'if exist requirements.txt (',
+    '  python -m pip install -r requirements.txt',
+    '  if errorlevel 1 goto error',
+    ')',
+    'python -m PyInstaller --noconfirm --clean --onefile --name ' + quoteBat(base) + ' ' + quoteBat(main),
+    'if errorlevel 1 goto error',
+    'echo.',
+    'echo EXE creado en la carpeta dist.',
+    'echo.',
+    'pause',
+    'exit /b 0',
+    ':error',
+    'echo.',
+    'echo Hubo un error. Revisa el mensaje anterior y las dependencias.',
+    'pause',
+    'exit /b 1'
+  ].join('\r\n') + '\r\n';
+
+  const readme = [
+    'PROYECTO PYTHON - COMPILACION A EXE',
+    '',
+    '1. Descomprime esta carpeta en una computadora con Windows.',
+    '2. Instala Python 3 desde https://www.python.org/downloads/windows/',
+    '   Durante la instalacion, activa "Add Python to PATH".',
+    '3. Si tu programa usa paquetes externos, agrega sus nombres a requirements.txt.',
+    '4. Haz doble clic en CREAR_EXE.bat.',
+    '5. Cuando termine, el ejecutable estará en la carpeta dist.',
+    '',
+    'IMPORTANTE:',
+    '- Este paquete no contiene un EXE ya compilado.',
+    '- La compilacion se realiza en Windows con PyInstaller.',
+    '- El archivo principal seleccionado para compilar es: ' + main,
+    '- Para programas con recursos externos (imagenes, bases de datos, etc.) puede ser necesario adaptar la configuracion de PyInstaller.',
+    '- Algunos antivirus pueden revisar o marcar ejecutables recién creados.',
+    '- Pyodide en el navegador no equivale a un Python de escritorio; algunas bibliotecas y funciones del sistema no son compatibles.'
+  ].join('\n');
+
+  items.push({name:'CREAR_EXE.bat', content:bat});
+  items.push({name:'LEEME_COMPILAR_EXE.txt', content:readme});
+  dl(zip(items), base + '_proyecto_para_EXE.zip');
+  log('Paquete para Windows preparado. Archivo principal: ' + main);
+  note('Descargando paquete para crear el .exe en Windows');
+}
+
 function dlZip(raw) {
   const list = raw ? files.filter(f => f.bytes || f.content.trim()).map(f => ({name:fname(f), content:f.content, bytes:f.bytes})) : organize();
   if (!list.length) return note('No hay archivos para el ZIP');
@@ -286,6 +379,7 @@ function dlZip(raw) {
 const fmt = n => n < 1024 ? n + ' B' : (n / 1024).toFixed(n < 10240 ? 1 : 0) + ' KB';
 function openDl() {
   const list = files.filter(f => f.bytes || f.content.trim()), box = $('dlList');
+  $('exeZip').classList.toggle('hidden', !files.some(f => !f.data && kind(f) === 'py' && f.content.trim()));
   $('dlZips').classList.toggle('hidden', !list.length);
   if (!list.length) { const p = document.createElement('p'); p.className = 'mut'; p.textContent = 'Todavía no hay contenido. Escribe código o abre un archivo.'; box.replaceChildren(p); }
   else {
@@ -463,6 +557,18 @@ async function runPy(f) {
     } catch (e) { log('No se pudo preparar ' + x.name + ': ' + e.message, 'err'); }
   });
   try {
+    // Pyodide no tiene una terminal interactiva propia en esta página.
+    // Se conecta input() con el cuadro de entrada del navegador.
+    p.runPython([
+      'import builtins',
+      'from js import prompt as _editor_prompt',
+      'def _editor_input(message=""):',
+      '    value = _editor_prompt(str(message))',
+      '    if value is None:',
+      '        raise EOFError("Entrada cancelada")',
+      '    return str(value)',
+      'builtins.input = _editor_input'
+    ].join('\\n'));
     await p.runPythonAsync(f.content);
     log('✓ Ejecución terminada.');
   } catch (e) {
@@ -565,6 +671,7 @@ $('dlBtn').onclick = openDl;
 $('dlClose').onclick = closeDl;
 $('zipOrd').onclick = () => dlZip();
 $('zipRaw').onclick = () => dlZip(true);
+$('exeZip').onclick = dlExePackage;
 $('dlSheet').onclick = e => { if (e.target === $('dlSheet')) closeDl(); };
 addEventListener('keydown', e => { if (e.key === 'Escape') closeDl(); });
 $('runBtn').onclick = () => run();
