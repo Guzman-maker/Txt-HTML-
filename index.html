@@ -101,20 +101,6 @@ const LANG = {html:'HTML', css:'CSS', js:'JavaScript', py:'Python', java:'Java',
 const MIME = {html:'text/html', css:'text/css', js:'text/javascript', json:'application/json'};
 const PY = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 const PAIR = {'(':')', '[':']', '{':'}', '"':'"', "'":"'", '`':'`'};
-const START = `<!DOCTYPE html>
-<html lang="es">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Mi página</title>
-<link rel="stylesheet" href="style.css">
-</head>
-<body>
-<h1>Hola 👋</h1>
-<button id="b">Tócame</button>
-<script src="app.js"><\/script>
-</body>
-</html>`;
 let files = [], cur = 0, deps = [], py, runner, toastT;
 const deb = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
@@ -163,11 +149,7 @@ try {
   const s = JSON.parse(localStorage.getItem('ed'));
   if (s && s.files && s.files.length) { files = s.files; cur = Math.min(s.cur | 0, files.length - 1); deps = s.deps || []; }
 } catch (_) {}
-if (!files.length) files = [
-  {name:'index.html', content:START},
-  {name:'style.css', content:'body{font-family:system-ui;padding:24px}\nh1{color:#2563eb}'},
-  {name:'app.js', content:"document.getElementById('b').onclick=()=>alert('¡Funciona!');"}
-];
+if (!files.length) files = [{name:'index.html', content:''}];
 const saveD = deb(save, 300);
 function note(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 2400); }
 function head() {
