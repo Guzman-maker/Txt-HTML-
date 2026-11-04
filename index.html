@@ -76,8 +76,10 @@ button.wide{width:100%}
 <main>
   <div id="tabs" class="tabs"></div>
   <div class="toolbar">
-    <label class="file-label" for="fileInput">Abrir</label>
+    <label class="file-label" for="fileInput">Abrir archivos</label>
     <input id="fileInput" type="file" multiple>
+    <label class="file-label" for="folderInput">Abrir carpeta</label>
+    <input id="folderInput" type="file" webkitdirectory directory multiple>
     <button id="dlBtn" class="primary" type="button">↓ Descargar</button>
     <button id="runBtn" type="button">▶ Ejecutar</button>
     <button id="renBtn" type="button">Renombrar</button>
@@ -97,7 +99,7 @@ button.wide{width:100%}
         <button data-p="tips" type="button">Consejos <span id="tipN"></span></button>
       </div>
       <div id="p-prev" class="pane">
-        <iframe id="preview" title="Vista previa" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+        <iframe id="preview" title="Vista previa" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
         <div class="pbar"><button id="refBtn" type="button">Actualizar</button><button id="fullBtn" type="button">⤢ Ver completa</button></div>
       </div>
       <div id="p-term" class="pane hidden">
@@ -472,28 +474,170 @@ function goto(l) {
   code.scrollTop = Math.max(0, (l - 3) * parseFloat(getComputedStyle(code).lineHeight));
 }
 
-// ---------- Vista previa ----------
+// ---------- Vista previa: proyecto local con rutas y recursos ----------
 const key = x => x.replace(/(?!^)@.*/, '');
+let previewUrls = [], previewBuildId = 0;
 function importMap() {
   if (!deps.length) return '';
   const m = {}; deps.forEach(d => { m[key(d)] = 'https://esm.sh/' + d; m[key(d) + '/'] = 'https://esm.sh/' + d + '/'; });
   return '<script type="importmap">' + JSON.stringify({imports:m}) + '<\/script>';
 }
+function pathNorm(path, base) {
+  try { path = decodeURIComponent(path); } catch (_) {}
+  path = String(path || '').replace(/\\/g, '/').split(/[?#]/)[0];
+  if (!path || /^(data:|blob:|https?:|mailto:|tel:|javascript:|#)/i.test(path)) return '';
+  let parts = path.startsWith('/') ? [] : (base || '').split('/').filter(Boolean);
+  path.replace(/^\/+/, '').split('/').forEach(x => {
+    if (!x || x === '.') return;
+    if (x === '..') parts.pop(); else parts.push(x);
+  });
+  return parts.join('/');
+}
+function assetFor(url, owner) {
+  const p = pathNorm(url, (owner || '').split('/').slice(0, -1).join('/'));
+  if (!p) return null;
+  let f = files.find(x => clean(x.name) === p || fname(x) === p);
+  if (!f && url.startsWith('/')) f = files.find(x => clean(x.name) === p.split('/').slice(1).join('/'));
+  if (!f) f = files.find(x => clean(x.name).endsWith('/' + p) || fname(x).endsWith('/' + p));
+  if (!f && !p.includes('/')) f = files.find(x => fname(x).split('/').pop() === p || clean(x.name).split('/').pop() === p);
+  return f || null;
+}
+function previewMime(f) {
+  const e = ext(fname(f));
+  return f.mime || IMG[e] || MIME[e] || (e === 'svg' ? 'image/svg+xml' : e === 'woff' ? 'font/woff' : e === 'woff2' ? 'font/woff2' : e === 'ttf' ? 'font/ttf' : e === 'otf' ? 'font/otf' : e === 'json' ? 'application/json' : e === 'html' ? 'text/html' : e === 'css' ? 'text/css' : e === 'js' || e === 'mjs' ? 'text/javascript' : 'application/octet-stream');
+}
+function rewriteCss(css, owner, urlOf, missing) {
+  css = css.replace(/url\(\s*(["']?)([^)"']+)\1\s*\)/gi, (m, q, u) => {
+    const raw = u.trim();
+    if (/^(data:|blob:|https?:|\/\/|#)/i.test(raw)) return m;
+    const f = assetFor(raw, owner);
+    if (!f) { missing.add(raw); return m; }
+    return 'url("' + urlOf(f) + '")';
+  });
+  css = css.replace(/@import\s+(["'])([^"']+)\1/gi, (m, q, u) => {
+    if (/^(data:|blob:|https?:|\/\/)/i.test(u)) return m;
+    const f = assetFor(u, owner);
+    if (!f) { missing.add(u); return m; }
+    return '@import url("' + urlOf(f) + '")';
+  });
+  return css;
+}
 function build(f) {
   const h = (f && kind(f) === 'html' && f) || (kind(file()) === 'html' && file()) || find('index.html') || files.find(x => kind(x) === 'html');
-  if (!h) return '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:24px;color:#333">Crea un archivo .html para ver la vista previa.</body>';
-  let s = h.content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (m, u) => { const x = find(u.replace(/^\.?\//, '')); return x ? '<style>' + x.content + '</style>' : m; });
-  s = s.replace(/<script([^>]*?)src=["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (m, a, u, b) => {
-    const x = find(u.replace(/^\.?\//, '')); if (!x || x.data) return m;
-    return '<script' + (/^\s*(import|export)\s/m.test(x.content) ? ' type="module"' : '') + '>' + x.content.replace(/<\/script/gi, '<\\/script') + '<\/script>';
+  if (!h) return '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:24px;color:#333">Abre el archivo HTML principal o una carpeta completa del proyecto.</body>';
+
+  const id = ++previewBuildId, missing = new Set(), localUrls = new Map();
+  const urlOf = x => {
+    if (localUrls.has(x)) return localUrls.get(x);
+    let u;
+    if (x.data) u = x.data;
+    else {
+      const blob = x.bytes ? new Blob([x.bytes], {type:previewMime(x)}) : new Blob([x.content || ''], {type:previewMime(x) + (previewMime(x).startsWith('text/') || previewMime(x).includes('javascript') ? ';charset=utf-8' : '')});
+      u = URL.createObjectURL(blob); previewUrls.push(u);
+    }
+    localUrls.set(x, u); return u;
+  };
+  const parser = new DOMParser();
+  const doc = parser.parseFromString(h.content, 'text/html');
+
+  // CSS local: se convierte en Blob y sus imágenes/fuentes se resuelven dentro del proyecto.
+  doc.querySelectorAll('link[href]').forEach(el => {
+    const href = el.getAttribute('href') || '';
+    if (/^(https?:|\/\/|data:|blob:|#)/i.test(href)) return;
+    const fcss = assetFor(href, h.name);
+    if (fcss && ext(fname(fcss)) === 'css') {
+      const css = rewriteCss(fcss.content || '', fcss.name, urlOf, missing);
+      const u = URL.createObjectURL(new Blob([css], {type:'text/css;charset=utf-8'})); previewUrls.push(u);
+      el.setAttribute('href', u);
+    } else if (!fcss) missing.add(href);
   });
-  const U = u => { const x = find(u.replace(/^\.?\//, '')); return x && x.data; };
-  s = s.replace(/\b(src|href)=(["'])([^"']+)\2/gi, (m, a, q, u) => { const d = U(u); return d ? a + '=' + q + d + q : m; });
-  s = s.replace(/url\((["']?)([^)"']+)\1\)/gi, (m, q, u) => { const d = U(u); return d ? 'url(' + q + d + q + ')' : m; });
+  doc.querySelectorAll('style').forEach(el => { el.textContent = rewriteCss(el.textContent, h.name, urlOf, missing); });
+
+  // JavaScript local. Se conserva el tipo del script (module/defer/async) y se carga desde Blob.
+  doc.querySelectorAll('script[src]').forEach(el => {
+    const src = el.getAttribute('src') || '';
+    if (/^(https?:|\/\/|data:|blob:)/i.test(src)) return;
+    const js = assetFor(src, h.name);
+    if (js && !js.data) el.setAttribute('src', urlOf(js));
+    else if (!js) missing.add(src);
+  });
+
+  // Imágenes, iconos, vídeos, audio, iframes y enlaces a otros archivos del mismo proyecto.
+  doc.querySelectorAll('[src], [href], [poster], [data-src]').forEach(el => {
+    ['src','href','poster','data-src'].forEach(attr => {
+      if (!el.hasAttribute(attr)) return;
+      const v = el.getAttribute(attr) || '';
+      if (/^(https?:|\/\/|data:|blob:|#|mailto:|tel:|javascript:)/i.test(v)) return;
+      // Los estilos y scripts ya fueron tratados arriba.
+      const a = assetFor(v, h.name);
+      if (a) el.setAttribute(attr, urlOf(a));
+      else if (!/^(about:|javascript:)/i.test(v)) missing.add(v);
+    });
+    if (el.hasAttribute('srcset')) {
+      const next = el.getAttribute('srcset').split(',').map(part => {
+        const bits = part.trim().split(/\s+/), u = bits.shift();
+        if (!u || /^(https?:|\/\/|data:|blob:)/i.test(u)) return part.trim();
+        const a = assetFor(u, h.name);
+        if (!a) { missing.add(u); return part.trim(); }
+        return [urlOf(a), ...bits].join(' ');
+      }).join(', ');
+      el.setAttribute('srcset', next);
+    }
+  });
+
+  // Reescribe recursos CSS inline que aparezcan en atributos style.
+  doc.querySelectorAll('[style]').forEach(el => el.setAttribute('style', rewriteCss(el.getAttribute('style'), h.name, urlOf, missing)));
+  const bridge = `<script>
+    // Puente de diagnóstico y almacenamiento aislado para la vista previa.
+    const send=(type,message)=>parent.postMessage({__editorPreview:true,type,message:String(message||'')},'*');
+    const mem=new Map();
+    const previewStorage={
+      get length(){return mem.size;},
+      key(i){return Array.from(mem.keys())[i]??null;},
+      getItem(k){k=String(k);return mem.has(k)?mem.get(k):null;},
+      setItem(k,v){mem.set(String(k),String(v));},
+      removeItem(k){mem.delete(String(k));},
+      clear(){mem.clear();}
+    };
+    try{Object.defineProperty(window,'localStorage',{configurable:true,value:previewStorage});}
+    catch(e){send('error','No se pudo habilitar almacenamiento temporal: '+e.message);}
+    addEventListener('error',e=>{
+      const t=e.target;
+      if(t&&t!==window&&('src' in t||'href' in t)){
+        send('error','No se pudo cargar un recurso: '+(t.src||t.href||t.tagName));
+      }else send('error',e.message||'Error de JavaScript');
+    },true);
+    addEventListener('unhandledrejection',e=>send('error','Promesa rechazada: '+(e.reason&&e.reason.message||e.reason)));
+    const oldError=console.error.bind(console);
+    console.error=(...a)=>{oldError(...a);send('console',a.join(' '));};
+    addEventListener('DOMContentLoaded',()=>send('ready','Vista previa cargada'));
+  <\/script>`;
   const map = importMap();
-  return map ? s.replace(/^(\s*<!doctype[^>]*>)?/i, m => m + map) : s;
+  const head = doc.head || doc.documentElement.insertBefore(doc.createElement('head'), doc.body || null);
+  if (map) head.insertAdjacentHTML('beforeend', map);
+  head.insertAdjacentHTML('beforeend', bridge);
+  if (missing.size) {
+    const sample = Array.from(missing).slice(0, 12);
+    log('Vista previa: no se encontraron ' + missing.size + ' recurso(s) local(es): ' + sample.join(', ') + (missing.size > sample.length ? '…' : ''), 'err');
+    log('Consejo: usa “Abrir carpeta” para cargar también las carpetas img, assets, css y js.', '');
+  } else log('Vista previa: recursos locales vinculados correctamente (' + localUrls.size + ').');
+  return '<!doctype html>\n' + doc.documentElement.outerHTML;
 }
-function refresh(f) { prev.srcdoc = build(f); }
+function refresh(f) {
+  const previous = previewUrls; previewUrls = [];
+  prev.srcdoc = build(f);
+  const thisBuild = previewBuildId;
+  prev.onload = () => {
+    if (thisBuild === previewBuildId) previous.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
+  };
+}
+if (!window.__editorPreviewListener) {
+  window.__editorPreviewListener = true;
+  addEventListener('message', e => {
+    if (e.source !== prev.contentWindow || !e.data || !e.data.__editorPreview) return;
+    log('Vista previa · ' + e.data.message, 'err');
+  });
+}
 const auto = deb(() => { if (!$('p-prev').classList.contains('hidden')) refresh(); }, 700);
 function show(p) {
   $('p-prev').classList.remove('full'); $('fullBtn').textContent = '⤢ Ver completa';
@@ -667,6 +811,7 @@ async function load(list) {
   note(msgs.length ? msgs.join(' · ') : 'Archivos cargados');
 }
 $('fileInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
+$('folderInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
 $('dlBtn').onclick = openDl;
 $('dlClose').onclick = closeDl;
 $('zipOrd').onclick = () => dlZip();
