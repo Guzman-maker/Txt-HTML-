@@ -25,10 +25,15 @@ main{max-width:1200px;margin:auto;padding:12px;padding-bottom:calc(24px + env(sa
 .toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 .toolbar button,.file-label{flex:1 1 auto}
 .file-label{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:11px;background:var(--panel2);font-weight:600;cursor:pointer}
-#fileInput{display:none}
+#fileInput,#dirInput{display:none}
 .status{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;padding:2px 2px 9px}
+.editor-wrap{position:relative}
 .editor-wrap,.panel{overflow:hidden;border:1px solid var(--line);border-radius:13px;background:#080d18}
-#code{display:block;width:100%;height:56vh;resize:vertical;border:0;outline:0;padding:14px;background:#080d18;color:#d8e5ff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:16px;line-height:1.55;tab-size:2;white-space:pre;overflow:auto;-webkit-appearance:none;appearance:none}
+#code{display:block;width:100%;height:56vh;resize:vertical;border:0;outline:0;padding:14px 14px 14px 4em;background:#080d18;color:#d8e5ff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:16px;line-height:1.55;tab-size:2;white-space:pre;overflow:auto;-webkit-appearance:none;appearance:none}
+#gut{position:absolute;left:0;top:0;bottom:0;width:3.4em;padding:14px 8px 40px 0;overflow:hidden;text-align:right;color:#5d6d8a;background:#0a1224;border-right:1px solid var(--line);font:16px/1.55 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;white-space:pre;user-select:none;-webkit-user-select:none;pointer-events:none}
+#gut b{font-weight:400}#gut b.err{color:var(--red)}#gut b.warn{color:var(--yel)}#gut b.info{color:var(--accent)}
+#imgv{display:flex;align-items:center;justify-content:center;height:56vh;background:#080d18}
+#imgv img{max-width:100%;max-height:100%;object-fit:contain}
 .panel{margin-top:14px}
 .ptabs{display:flex;background:var(--panel);border-bottom:1px solid var(--line)}
 .ptabs button{flex:1;border:0;border-radius:0;background:none;color:var(--muted)}
@@ -48,7 +53,7 @@ iframe{flex:1;width:100%;border:0;background:#fff}
 #tips li.err{border-color:var(--red)}#tips li.info{border-color:var(--accent)}
 .hidden{display:none!important}
 .toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:60;background:#26354d;color:#fff;border:1px solid #405574;border-radius:12px;padding:11px 15px;font-size:13px;max-width:90%;text-align:center}
-@media(min-width:900px){main{padding:20px}.workspace{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.panel{margin-top:0}#code,.pane{height:68vh}}
+@media(min-width:900px){main{padding:20px}.workspace{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.panel{margin-top:0}#code,#imgv,.pane{height:68vh}}
 </style>
 </head>
 <body>
@@ -63,6 +68,8 @@ iframe{flex:1;width:100%;border:0;background:#fff}
   <div class="toolbar">
     <label class="file-label" for="fileInput">Abrir</label>
     <input id="fileInput" type="file" multiple>
+    <label class="file-label" for="dirInput">Carpeta</label>
+    <input id="dirInput" type="file" webkitdirectory multiple>
     <button id="dlBtn" class="primary" type="button">↓ Archivo</button>
     <button id="zipBtn" type="button">↓ ZIP</button>
     <button id="runBtn" type="button">▶ Ejecutar</button>
@@ -72,6 +79,8 @@ iframe{flex:1;width:100%;border:0;background:#fff}
   <div class="status"><span id="lang"></span><span id="count"></span></div>
   <div class="workspace">
     <section class="editor-wrap">
+      <div id="gut" aria-hidden="true"></div>
+      <div id="imgv" class="hidden"><img alt="Imagen"></div>
       <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Editor de código"></textarea>
     </section>
     <section class="panel">
@@ -100,9 +109,10 @@ const code = $('code'), out = $('out'), cmd = $('cmd'), prev = $('preview');
 const EXT = {htm:'html', mjs:'js'};
 const LANG = {html:'HTML', css:'CSS', js:'JavaScript', py:'Python', java:'Java', json:'JSON', md:'Markdown', txt:'Texto'};
 const MIME = {html:'text/html', css:'text/css', js:'text/javascript', json:'application/json'};
+const IMG = {png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', bmp:'image/bmp', ico:'image/x-icon', avif:'image/avif'};
 const PY = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
 const PAIR = {'(':')', '[':']', '{':'}', '"':'"', "'":"'", '`':'`'};
-let files = [], cur = 0, deps = [], py, runner, toastT;
+let files = [], cur = 0, deps = [], py, runner, toastT, marks = {}, gutN = 0;
 const deb = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
 // ---------- ZIP (sin librerías) ----------
@@ -112,7 +122,7 @@ const crc = b => { let c = -1; for (const x of b) c = CT[(c ^ x) & 255] ^ (c >>>
 function zip(list) {
   const e = new TextEncoder(), parts = [], cen = []; let off = 0;
   for (const f of list) {
-    const n = e.encode(f.name), d = e.encode(f.content), c = crc(d);
+    const n = e.encode(f.name), d = f.bytes || e.encode(f.content), c = crc(d);
     const h = new DataView(new ArrayBuffer(30));
     h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
     h.setUint32(14, c, true); h.setUint32(18, d.length, true); h.setUint32(22, d.length, true); h.setUint16(26, n.length, true);
@@ -141,10 +151,18 @@ function detect(c) {
   return '';
 }
 const kind = f => { const e = ext(f.name); if (e && e !== 'txt') return EXT[e] || e; return detect(f.content) || 'txt'; };
-const fname = f => { const e = ext(f.name); if (e && e !== 'txt') return f.name; return (e ? f.name.replace(/\.txt$/i, '') : f.name) + '.' + kind(f); };
+const DEF = {css:'style', js:'script', py:'main'};
+const fname = f => {
+  const e = ext(f.name); if (e && e !== 'txt') return f.name;
+  const k = kind(f), i = f.name.lastIndexOf('/') + 1; let b = f.name.slice(i).replace(/\.txt$/i, '');
+  if (k === 'html') b = 'index';
+  else if (k === 'java') { const m = f.content.match(/public\s+(?:final\s+|abstract\s+)?(?:class|interface|enum)\s+(\w+)/); if (m) b = m[1]; }
+  else if (b === 'sin-titulo') b = DEF[k] || b;
+  return f.name.slice(0, i) + b + '.' + k;
+};
 const file = () => files[cur];
 const find = n => files.find(f => f.name === n);
-const clean = n => (n || '').replace(/[\/\\]/g, '_').trim();
+const clean = n => (n || '').replace(/\\/g, '/').split('/').map(x => x.trim()).filter(x => x && x !== '.' && x !== '..').join('/');
 
 // ---------- Estado ----------
 const save = () => {};
@@ -157,9 +175,14 @@ function note(m) { const t = $('toast'); t.textContent = m; t.classList.remove('
 function head() {
   const f = file(), k = kind(f);
   $('fileName').textContent = fname(f);
-  $('lang').textContent = (!ext(f.name) || ext(f.name) === 'txt') && !code.value.trim() ? 'Detectando…' : (LANG[k] || k.toUpperCase());
+  $('lang').textContent = f.data ? 'Imagen' : (!ext(f.name) || ext(f.name) === 'txt') && !code.value.trim() ? 'Detectando…' : (LANG[k] || k.toUpperCase());
   const n = code.value ? code.value.split('\n').length : 0;
-  $('count').textContent = n + ' líneas · ' + code.value.length + ' caracteres';
+  $('count').textContent = f.data ? Math.round(f.bytes.length / 1024) + ' KB' : n + ' líneas · ' + code.value.length + ' caracteres';
+}
+function gutter() {
+  const n = code.value ? code.value.split('\n').length : 1; let h = '';
+  for (let i = 1; i <= n; i++) h += (marks[i] ? '<b class="' + marks[i] + '">' + i + '</b>' : i) + '\n';
+  gutN = n; $('gut').innerHTML = h; $('gut').scrollTop = code.scrollTop;
 }
 function render() {
   $('tabs').replaceChildren(...files.map((f, i) => {
@@ -168,12 +191,15 @@ function render() {
     b.onclick = () => { cur = i; render(); save(); };
     return b;
   }));
-  code.value = file().content; head(); lintNow();
+  const im = !!file().data;
+  code.classList.toggle('hidden', im); $('gut').classList.toggle('hidden', im); $('imgv').classList.toggle('hidden', !im);
+  if (im) $('imgv').firstElementChild.src = file().data;
+  code.value = file().content; head(); lintNow(); auto();
 }
-function add(name, content = '') {
+function add(name, content = '', extra) {
   name = clean(name) || 'sin-nombre'; let n = name, i = 2;
   while (find(n)) n = name.replace(/(\.\w+)?$/, '_' + i++ + '$1');
-  files.push({name:n, content}); cur = files.length - 1; render(); save(); return n;
+  files.push(Object.assign({name:n, content}, extra)); cur = files.length - 1; render(); save(); return n;
 }
 
 // ---------- Descargas ----------
@@ -182,21 +208,74 @@ function dl(blob, name) {
   a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(u), 1500);
 }
-function dlFile(f) { const n = fname(f); dl(new Blob([f.content], {type:(MIME[kind(f)] || 'text/plain') + ';charset=utf-8'}), n); note('Descargando ' + n); }
-function dlZip() { dl(zip(files.map(f => ({name:fname(f), content:f.content}))), 'proyecto.zip'); note('Descargando proyecto.zip (' + files.length + ' archivos)'); }
+function dlFile(f) {
+  const n = fname(f).split('/').pop();
+  dl(f.bytes ? new Blob([f.bytes], {type:f.mime}) : new Blob([f.content], {type:(MIME[kind(f)] || 'text/plain') + ';charset=utf-8'}), n);
+  note('Descargando ' + n);
+}
+const SRC = /^(py|java|c|cpp|h|cs|go|rs|php|rb|ts|tsx|jsx|sh|kt|swift|lua)$/;
+function place(f, n) {
+  const e = ext(n), b = n.split('/').pop();
+  if (IMG[e]) return 'img/' + b;
+  if (e === 'html') return b;
+  if (e === 'css') return 'css/' + b;
+  if (e === 'js') return 'js/' + b;
+  if (SRC.test(e)) { const m = e === 'java' && f.content.match(/^\s*package\s+([\w.]+)\s*;/m); return 'src/' + (m ? m[1].replace(/\./g, '/') + '/' : '') + b; }
+  if (/^(json|csv|xml|ya?ml|sql)$/.test(e)) return 'data/' + b;
+  return 'docs/' + b;
+}
+function rel(a, b) {
+  const A = a.split('/').slice(0, -1), B = b.split('/'); let i = 0;
+  while (i < A.length && i < B.length - 1 && A[i] === B[i]) i++;
+  return '../'.repeat(A.length - i) + B.slice(i).join('/');
+}
+function organize() {
+  const used = new Set(), map = {};
+  const items = files.filter(f => f.bytes || f.content.trim()).map(f => {
+    const n = fname(f), p = place(f, n); let q = p, i = 2;
+    while (used.has(q)) q = p.replace(/(\.\w+)?$/, '_' + i++ + '$1');
+    used.add(q); map[n] = q; map[f.name] = q; return {f, p:q};
+  });
+  const keys = Object.keys(map).sort((a, b) => b.length - a.length).map(k => k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+  const re = keys.length ? new RegExp('(["\'(])(?:\\.\\/)?(' + keys.join('|') + ')(?=["\')#?])', 'g') : null;
+  return items.map(({f, p}) => {
+    let c = f.content; const e = ext(p);
+    if (re && !f.bytes && (e === 'html' || e === 'css' || e === 'js')) c = c.replace(re, (m, a, k, off, str) => {
+      if (e !== 'js') return a + rel(p, map[k]);
+      if (/(?:from|import)\s*\(?\s*$/.test(str.slice(Math.max(0, off - 20), off))) { const r = rel(p, map[k]); return a + (r[0] === '.' ? r : './' + r); }
+      return a + map[k];
+    });
+    return {name:p, content:c, bytes:f.bytes};
+  });
+}
+function dlZip(raw) {
+  const list = raw ? files.filter(f => f.bytes || f.content.trim()).map(f => ({name:fname(f), content:f.content, bytes:f.bytes})) : organize();
+  if (!list.length) return note('No hay archivos para el ZIP');
+  dl(zip(list), 'proyecto.zip');
+  if (!raw) { log('ZIP ordenado:'); list.forEach(x => log('  ' + x.name)); }
+  note('Descargando proyecto.zip (' + list.length + ' archivos' + (raw ? '' : ', ordenado') + ')');
+}
 
 // ---------- Consejos (análisis estático básico) ----------
+function brackets(c, k) {
+  const st = [], pr = {')':'(', ']':'[', '}':'{'}; let line = 1, q = '';
+  for (let i = 0; i < c.length; i++) {
+    const ch = c[i];
+    if (ch === '\n') { line++; if (q !== '`') q = ''; continue; }
+    if (q) { if (ch === '\\') i++; else if (ch === q) q = ''; continue; }
+    if (k !== 'html' && k !== 'css' && (ch === '"' || ch === "'" || (ch === '`' && k !== 'py'))) { q = ch; continue; }
+    if (((k === 'js' || k === 'java') && ch === '/' && c[i + 1] === '/') || (k === 'py' && ch === '#')) { while (i < c.length && c[i] !== '\n') i++; i--; continue; }
+    if ('([{'.includes(ch)) st.push({ch, line});
+    else if (')]}'.includes(ch)) { const t = st.pop(); if (!t || t.ch !== pr[ch]) return {line, msg:'"' + ch + '" sin pareja'}; }
+  }
+  return st.length ? {line:st[st.length - 1].line, msg:'"' + st[st.length - 1].ch + '" sin cerrar'} : null;
+}
 function lint(f) {
   const c = f.content, L = c.split('\n'), k = kind(f), t = [];
   const add = (l, m, s = 'warn') => { if (t.length < 40) t.push({l, m, k:s}); };
   const each = (re, m, s) => L.forEach((x, i) => { if (re.test(x)) add(i + 1, m, s); });
   if (!c.trim()) return t;
-  if (['html', 'css', 'js', 'py', 'java'].includes(k)) {
-    [['{', '}'], ['(', ')'], ['[', ']']].forEach(([a, b]) => {
-      const d = c.split(a).length - c.split(b).length;
-      if (d) add(0, 'Posible error: sobran ' + Math.abs(d) + ' "' + (d > 0 ? a : b) + '" (revisa ' + a + b + ').', 'err');
-    });
-  }
+  if (['html', 'css', 'js', 'py', 'java'].includes(k)) { const bk = brackets(c, k); if (bk) add(bk.line, 'Posible error: ' + bk.msg + '.', 'err'); }
   if (k === 'html') {
     if (!/<!doctype html/i.test(c)) add(1, 'Falta <!DOCTYPE html> al inicio.');
     if (!/<html[^>]*\blang=/i.test(c)) add(1, 'Agrega lang al <html> (accesibilidad y SEO).');
@@ -231,7 +310,8 @@ function lint(f) {
   return t;
 }
 function lintNow() {
-  const t = lint(file());
+  const t = lint(file()); marks = {};
+  t.forEach(x => { if (x.l && marks[x.l] !== 'err') marks[x.l] = x.k; }); gutter();
   $('tipN').textContent = t.length ? '(' + t.length + ')' : '';
   $('tips').replaceChildren(...(t.length ? t : [{m:'Sin problemas detectados.', k:'info'}]).map(x => {
     const li = document.createElement('li');
@@ -242,9 +322,10 @@ function lintNow() {
 }
 const lintD = deb(lintNow, 500);
 function goto(l) {
+  if (file().data) return;
   const v = code.value.split('\n'); let o = 0;
   for (let i = 0; i < l - 1; i++) o += v[i].length + 1;
-  code.scrollIntoView({block:'center'}); code.focus();
+  code.scrollIntoView({block:'center'}); code.focus({preventScroll:true});
   code.setSelectionRange(o, o + (v[l - 1] || '').length);
   code.scrollTop = Math.max(0, (l - 3) * parseFloat(getComputedStyle(code).lineHeight));
 }
@@ -259,11 +340,14 @@ function importMap() {
 function build(f) {
   const h = (f && kind(f) === 'html' && f) || (kind(file()) === 'html' && file()) || find('index.html') || files.find(x => kind(x) === 'html');
   if (!h) return '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:24px;color:#333">Crea un archivo .html para ver la vista previa.</body>';
-  let s = h.content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (m, u) => { const x = find(u); return x ? '<style>' + x.content + '</style>' : m; });
+  let s = h.content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (m, u) => { const x = find(u.replace(/^\.?\//, '')); return x ? '<style>' + x.content + '</style>' : m; });
   s = s.replace(/<script([^>]*?)src=["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (m, a, u, b) => {
-    const x = find(u); if (!x) return m;
+    const x = find(u.replace(/^\.?\//, '')); if (!x || x.data) return m;
     return '<script' + (/^\s*(import|export)\s/m.test(x.content) ? ' type="module"' : '') + '>' + x.content.replace(/<\/script/gi, '<\\/script') + '<\/script>';
   });
+  const U = u => { const x = find(u.replace(/^\.?\//, '')); return x && x.data; };
+  s = s.replace(/\b(src|href)=(["'])([^"']+)\2/gi, (m, a, q, u) => { const d = U(u); return d ? a + '=' + q + d + q : m; });
+  s = s.replace(/url\((["']?)([^)"']+)\1\)/gi, (m, q, u) => { const d = U(u); return d ? 'url(' + q + d + q + ')' : m; });
   const map = importMap();
   return map ? s.replace(/^(\s*<!doctype[^>]*>)?/i, m => m + map) : s;
 }
@@ -322,6 +406,7 @@ function npm(a) {
 async function run(n) {
   const f = n ? find(n) : file();
   if (!f) return log('No existe: ' + n, 'err');
+  if (f.data) { show('prev'); prev.srcdoc = '<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%">'; return; }
   const k = kind(f);
   if (k === 'html' || k === 'css') { show('prev'); refresh(f); }
   else if (k === 'js') { show('term'); runJS(f.content); }
@@ -333,9 +418,9 @@ async function exec(line) {
   log('$ ' + line, 'cmd');
   const [c, ...a] = line.trim().split(/\s+/); if (!c) return;
   try {
-    if (c === 'help') log('ls · cat <f> · touch <f> · rm <f> · mv <a> <b> · run [f] (o python/node) · zip · clear\npip install <pkg> · pip list · npm install <pkg> · npm ls · npm rm <pkg>');
+    if (c === 'help') log('ls · cat <f> · touch <f> · rm <f> · mv <a> <b> · run [f] (o python/node) · zip (ordenado) · zip --plano · clear\npip install <pkg> · pip list · npm install <pkg> · npm ls · npm rm <pkg>');
     else if (c === 'ls') log(files.map(f => f.name).join('  '));
-    else if (c === 'cat') { const f = find(a[0]); f ? log(f.content) : log('No existe: ' + a[0], 'err'); }
+    else if (c === 'cat') { const f = find(a[0]); f ? log(f.data ? '(imagen, ' + f.bytes.length + ' bytes)' : f.content) : log('No existe: ' + a[0], 'err'); }
     else if (c === 'touch') a.forEach(n => find(n) || add(n));
     else if (c === 'rm') a.forEach(n => {
       const i = files.findIndex(f => f.name === n);
@@ -345,7 +430,7 @@ async function exec(line) {
     });
     else if (c === 'mv') { const f = find(a[0]); if (!f || !clean(a[1])) log('Uso: mv <origen> <nuevo>', 'err'); else { f.name = clean(a[1]); render(); save(); } }
     else if (c === 'clear') out.replaceChildren();
-    else if (c === 'zip') dlZip();
+    else if (c === 'zip') dlZip(a[0] === '--plano');
     else if (['run', 'python', 'python3', 'node'].includes(c)) await run(a[0]);
     else if (c === 'pip' || c === 'pip3') await pip(a);
     else if (c === 'npm') npm(a);
@@ -369,23 +454,33 @@ code.addEventListener('keydown', e => {
   else if (s === t && v[s] === e.key && ')]}"\'`'.includes(e.key)) { e.preventDefault(); code.setSelectionRange(s + 1, s + 1); }
   else if (s === t && PAIR[e.key] && !(/['"`]/.test(e.key) && /\w/.test(v[s - 1] || ''))) { e.preventDefault(); ins(e.key + PAIR[e.key]); code.setSelectionRange(s + 1, s + 1); }
 });
-code.addEventListener('input', () => { file().content = code.value; saveD(); head(); lintD(); auto(); });
+code.addEventListener('input', () => { file().content = code.value; saveD(); head(); lintD(); auto(); if ((code.value ? code.value.split('\n').length : 1) !== gutN) gutter(); });
+code.addEventListener('scroll', () => { $('gut').scrollTop = code.scrollTop; });
 
 // ---------- Botones ----------
-$('newBtn').onclick = () => { const n = prompt('Nombre del archivo (ej. main.py, Main.java, style.css)'); if (n) add(n); };
-$('fileInput').onchange = async e => {
-  const msgs = [];
-  for (const f of e.target.files) {
+$('newBtn').onclick = () => { const n = prompt('Nombre del archivo (ej. main.py, css/estilo.css)'); if (n) add(n); };
+async function load(list) {
+  const msgs = [], blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content;
+  for (const f of list) {
+    let n = clean(f.webkitRelativePath ? f.webkitRelativePath.replace(/^[^/]+\//, '') : f.name);
     try {
-      let n = f.name; const c = await f.text(), d = (!ext(n) || ext(n) === 'txt') ? detect(c) : '';
-      if (d) { n = n.replace(/\.txt$/i, '') + '.' + d; msgs.push(f.name + ' → ' + n); }
+      if (IMG[ext(n)]) {
+        const data = await new Promise(r => { const fr = new FileReader(); fr.onload = () => r(fr.result); fr.readAsDataURL(f); });
+        add(n, '', {data, bytes:new Uint8Array(await f.arrayBuffer()), mime:IMG[ext(n)]}); continue;
+      }
+      if (/^(audio|video)\//.test(f.type) || /^application\/(pdf|zip|octet-stream|x-zip)/.test(f.type)) { msgs.push('Omitido ' + n); continue; }
+      const c = await f.text();
+      if ((!ext(n) || ext(n) === 'txt') && detect(c)) { const m = fname({name:n, content:c}); msgs.push(n + ' → ' + m); n = m; }
       add(n, c);
-    } catch (_) { msgs.push('No se pudo leer ' + f.name); }
+    } catch (_) { msgs.push('No se pudo leer ' + n); }
   }
-  e.target.value = ''; note(msgs.length ? 'Detectado: ' + msgs.join(' · ') : 'Archivos cargados');
-};
+  if (blank && files.length > 1) { files.shift(); cur = Math.max(0, cur - 1); render(); }
+  note(msgs.length ? msgs.join(' · ') : 'Archivos cargados');
+}
+$('fileInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
+$('dirInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
 $('dlBtn').onclick = () => dlFile(file());
-$('zipBtn').onclick = dlZip;
+$('zipBtn').onclick = () => dlZip();
 $('runBtn').onclick = () => run();
 $('renBtn').onclick = () => { const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
 $('delBtn').onclick = () => {
