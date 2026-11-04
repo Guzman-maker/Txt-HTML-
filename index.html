@@ -1,153 +1,417 @@
 <!DOCTYPE html>
 <html lang="es">
 <head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
-  <meta name="theme-color" content="#111827">
-  <title>Editor HTML móvil</title>
-  <style>
-    :root { color-scheme: dark; --bg:#0b1020; --panel:#151d2e; --panel2:#1d2940; --line:#2b3953; --text:#e8eef9; --muted:#9eacc4; --accent:#6ea8fe; --green:#31c48d; }
-    * { box-sizing:border-box; }
-    html { height:100%; background:var(--bg); -webkit-text-size-adjust:100%; }
-    body { margin:0; min-height:100%; background:var(--bg); color:var(--text); font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
-    button, input, textarea { font:inherit; }
-    button { min-height:44px; border:1px solid var(--line); border-radius:11px; padding:10px 13px; color:var(--text); background:var(--panel2); font-weight:600; cursor:pointer; touch-action:manipulation; }
-    button.primary { background:var(--accent); border-color:var(--accent); color:#071326; }
-    button:active { transform:scale(.98); }
-    header { position:sticky; top:0; z-index:5; padding:calc(12px + env(safe-area-inset-top)) 14px 12px; background:#111827f2; border-bottom:1px solid var(--line); backdrop-filter:blur(12px); }
-    .top { display:flex; align-items:center; justify-content:space-between; gap:10px; }
-    h1 { margin:0; font-size:18px; letter-spacing:.2px; }
-    .sub { margin-top:4px; color:var(--muted); font-size:12px; }
-    main { max-width:1000px; margin:auto; padding:12px; padding-bottom:calc(24px + env(safe-area-inset-bottom)); }
-    .toolbar { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:10px; }
-    .toolbar button { flex:1 1 auto; }
-    .file-label { display:flex; align-items:center; justify-content:center; min-height:44px; padding:10px 13px; border:1px solid var(--line); border-radius:11px; background:var(--panel2); font-weight:600; flex:1 1 auto; cursor:pointer; }
-    #fileInput { display:none; }
-    .status { display:flex; justify-content:space-between; gap:8px; color:var(--muted); font-size:12px; padding:2px 2px 9px; }
-    .editor-wrap { overflow:hidden; border:1px solid var(--line); border-radius:13px; background:#080d18; }
-    .editor-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--panel); border-bottom:1px solid var(--line); color:var(--muted); font-size:12px; }
-    #code { display:block; width:100%; min-height:56vh; height:62vh; max-height:75vh; resize:vertical; border:0; outline:0; border-radius:0; padding:14px; background:#080d18; color:#d8e5ff; font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:16px; line-height:1.55; tab-size:2; white-space:pre; overflow:auto; -webkit-appearance:none; appearance:none; touch-action:pan-x pan-y; }
-    #code:focus { outline:2px solid #6ea8fe55; outline-offset:-2px; }
-    .hint { color:var(--muted); font-size:12px; line-height:1.5; margin:10px 2px 14px; }
-    .preview-box { margin-top:14px; border:1px solid var(--line); border-radius:13px; overflow:hidden; background:white; }
-    .preview-head { display:flex; justify-content:space-between; align-items:center; padding:10px 12px; background:var(--panel); color:var(--text); font-size:13px; }
-    iframe { display:block; width:100%; height:55vh; border:0; background:white; }
-    .hidden { display:none; }
-    .toast { position:fixed; left:50%; bottom:calc(20px + env(safe-area-inset-bottom)); transform:translateX(-50%); z-index:10; background:#26354d; color:white; border:1px solid #405574; border-radius:12px; padding:11px 15px; font-size:13px; box-shadow:0 8px 30px #0008; max-width:90%; text-align:center; }
-    @media (min-width:760px) { main { padding:20px; } #code { height:65vh; } .workspace { display:grid; grid-template-columns:1fr 1fr; gap:14px; align-items:start; } .preview-box { margin-top:0; } iframe { height:70vh; } }
-  </style>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#111827">
+<title>Editor de código móvil</title>
+<style>
+:root{color-scheme:dark;--bg:#0b1020;--panel:#151d2e;--panel2:#1d2940;--line:#2b3953;--text:#e8eef9;--muted:#9eacc4;--accent:#6ea8fe;--red:#f87171;--yel:#fbbf24}
+*{box-sizing:border-box}
+html{height:100%;background:var(--bg);-webkit-text-size-adjust:100%}
+body{margin:0;min-height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+button,input,textarea{font:inherit}
+button{min-height:44px;border:1px solid var(--line);border-radius:11px;padding:8px 12px;color:var(--text);background:var(--panel2);font-weight:600;cursor:pointer;touch-action:manipulation}
+button.primary{background:var(--accent);border-color:var(--accent);color:#071326}
+button:active{transform:scale(.98)}
+header{position:sticky;top:0;z-index:5;padding:calc(12px + env(safe-area-inset-top)) 14px 12px;background:#111827f2;border-bottom:1px solid var(--line);backdrop-filter:blur(12px)}
+.top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+h1{margin:0;font-size:18px}
+.sub{margin-top:4px;color:var(--muted);font-size:12px}
+main{max-width:1200px;margin:auto;padding:12px;padding-bottom:calc(24px + env(safe-area-inset-bottom))}
+.tabs{display:flex;gap:6px;overflow-x:auto;padding-bottom:8px}
+.tab{flex:none;min-height:38px;padding:6px 12px;font-size:13px}
+.tab.on{border-color:var(--accent);color:var(--accent)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+.toolbar button,.file-label{flex:1 1 auto}
+.file-label{display:flex;align-items:center;justify-content:center;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:11px;background:var(--panel2);font-weight:600;cursor:pointer}
+#fileInput{display:none}
+.status{display:flex;justify-content:space-between;color:var(--muted);font-size:12px;padding:2px 2px 9px}
+.editor-wrap,.panel{overflow:hidden;border:1px solid var(--line);border-radius:13px;background:#080d18}
+#code{display:block;width:100%;height:56vh;resize:vertical;border:0;outline:0;padding:14px;background:#080d18;color:#d8e5ff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:16px;line-height:1.55;tab-size:2;white-space:pre;overflow:auto;-webkit-appearance:none;appearance:none}
+.panel{margin-top:14px}
+.ptabs{display:flex;background:var(--panel);border-bottom:1px solid var(--line)}
+.ptabs button{flex:1;border:0;border-radius:0;background:none;color:var(--muted)}
+.ptabs button.on{color:var(--accent);box-shadow:inset 0 -2px var(--accent)}
+.pane{height:52vh;display:flex;flex-direction:column}
+.pane.full{position:fixed;inset:0;z-index:50;height:auto;background:var(--bg);padding-top:env(safe-area-inset-top);padding-bottom:env(safe-area-inset-bottom)}
+iframe{flex:1;width:100%;border:0;background:#fff}
+.pbar{display:flex;gap:8px;padding:8px;background:var(--panel)}
+.pbar button{flex:1}
+#out{flex:1;overflow:auto;padding:10px;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;white-space:pre-wrap;word-break:break-word}
+#out .err{color:var(--red)}#out .cmd{color:var(--accent)}
+.tin{display:flex;align-items:center;gap:8px;padding:6px 10px;border-top:1px solid var(--line);background:var(--panel);font-family:ui-monospace,Menlo,monospace}
+#cmd{flex:1;min-width:0;background:none;border:0;outline:0;color:var(--text);font-size:16px;font-family:inherit}
+#tips{list-style:none;margin:0;padding:6px;overflow:auto;flex:1}
+#tips li{padding:10px;border-radius:9px;font-size:14px;cursor:pointer;border-left:3px solid var(--yel);margin-bottom:6px;background:var(--panel)}
+#tips li.err{border-color:var(--red)}#tips li.info{border-color:var(--accent)}
+.hidden{display:none!important}
+.toast{position:fixed;left:50%;bottom:calc(20px + env(safe-area-inset-bottom));transform:translateX(-50%);z-index:60;background:#26354d;color:#fff;border:1px solid #405574;border-radius:12px;padding:11px 15px;font-size:13px;max-width:90%;text-align:center}
+@media(min-width:900px){main{padding:20px}.workspace{display:grid;grid-template-columns:1fr 1fr;gap:14px;align-items:start}.panel{margin-top:0}#code,.pane{height:68vh}}
+</style>
 </head>
 <body>
 <header>
   <div class="top">
-    <div>
-      <h1>Editor HTML móvil</h1>
-      <div class="sub">Abre, edita y descarga tu archivo como index.html</div>
-    </div>
-    <button id="clearBtn" type="button" title="Limpiar editor">Limpiar</button>
+    <div><h1>Editor de código</h1><div class="sub" id="fileName"></div></div>
+    <button id="newBtn" type="button">＋ Nuevo</button>
   </div>
 </header>
 <main>
+  <div id="tabs" class="tabs"></div>
   <div class="toolbar">
-    <label class="file-label" for="fileInput">＋ Abrir TXT / HTML</label>
-    <input id="fileInput" type="file" accept=".txt,.html,.htm,text/plain,text/html">
-    <button id="downloadBtn" class="primary" type="button">↓ Descargar index.html</button>
-    <button id="previewBtn" type="button">▶ Vista previa</button>
+    <label class="file-label" for="fileInput">Abrir</label>
+    <input id="fileInput" type="file" multiple>
+    <button id="dlBtn" class="primary" type="button">↓ Archivo</button>
+    <button id="zipBtn" type="button">↓ ZIP</button>
+    <button id="runBtn" type="button">▶ Ejecutar</button>
+    <button id="renBtn" type="button">Renombrar</button>
+    <button id="delBtn" type="button">Borrar</button>
   </div>
-  <div class="status"><span id="fileName">Sin archivo abierto</span><span id="count">0 líneas</span></div>
+  <div class="status"><span id="lang"></span><span id="count"></span></div>
   <div class="workspace">
     <section class="editor-wrap">
-      <div class="editor-head"><span>⌘ Código fuente</span><span>HTML · CSS · JS</span></div>
-      <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Editor de código" placeholder="Abre un archivo TXT o HTML, o escribe/pega aquí tu código..."></textarea>
+      <textarea id="code" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="off" aria-label="Editor de código"></textarea>
     </section>
-    <section id="previewSection" class="preview-box hidden">
-      <div class="preview-head"><strong>Vista previa</strong><button id="refreshBtn" type="button">Actualizar</button></div>
-      <iframe id="preview" title="Vista previa de tu página" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+    <section class="panel">
+      <div class="ptabs">
+        <button data-p="prev" class="on" type="button">Vista previa</button>
+        <button data-p="term" type="button">Terminal</button>
+        <button data-p="tips" type="button">Consejos <span id="tipN"></span></button>
+      </div>
+      <div id="p-prev" class="pane">
+        <iframe id="preview" title="Vista previa" sandbox="allow-scripts allow-forms allow-modals"></iframe>
+        <div class="pbar"><button id="refBtn" type="button">Actualizar</button><button id="fullBtn" type="button">⤢ Ver completa</button></div>
+      </div>
+      <div id="p-term" class="pane hidden">
+        <div id="out"></div>
+        <div class="tin"><span>$</span><input id="cmd" autocapitalize="off" autocomplete="off" autocorrect="off" spellcheck="false" placeholder="help" aria-label="Comando"></div>
+      </div>
+      <div id="p-tips" class="pane hidden"><ul id="tips"></ul></div>
     </section>
   </div>
-  <p class="hint">Consejo para iPhone: el editor usa texto de 16 px o más para evitar que Safari haga zoom al tocarlo. Si el teclado tapa parte del código, desplázate dentro del editor. Tu archivo original no se modifica; la descarga crea una copia llamada <b>index.html</b>.</p>
 </main>
 <div id="toast" class="toast hidden" role="status"></div>
 <script>
 (() => {
-  const code = document.getElementById('code');
-  const fileInput = document.getElementById('fileInput');
-  const fileName = document.getElementById('fileName');
-  const count = document.getElementById('count');
-  const preview = document.getElementById('preview');
-  const previewSection = document.getElementById('previewSection');
-  const toast = document.getElementById('toast');
-  let toastTimer;
+const $ = id => document.getElementById(id);
+const code = $('code'), out = $('out'), cmd = $('cmd'), prev = $('preview');
+const EXT = {htm:'html', mjs:'js'};
+const LANG = {html:'HTML', css:'CSS', js:'JavaScript', py:'Python', java:'Java', json:'JSON', md:'Markdown', txt:'Texto'};
+const MIME = {html:'text/html', css:'text/css', js:'text/javascript', json:'application/json'};
+const PY = 'https://cdn.jsdelivr.net/pyodide/v0.26.4/full/';
+const PAIR = {'(':')', '[':']', '{':'}', '"':'"', "'":"'", '`':'`'};
+const START = `<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mi página</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<h1>Hola 👋</h1>
+<button id="b">Tócame</button>
+<script src="app.js"><\/script>
+</body>
+</html>`;
+let files = [], cur = 0, deps = [], py, runner, toastT;
+const deb = (fn, ms) => { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; };
 
-  function notify(message) {
-    toast.textContent = message;
-    toast.classList.remove('hidden');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => toast.classList.add('hidden'), 2400);
+// ---------- ZIP (sin librerías) ----------
+//ZIP
+const CT = (() => { const t = []; for (let n = 0; n < 256; n++) { let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+const crc = b => { let c = -1; for (const x of b) c = CT[(c ^ x) & 255] ^ (c >>> 8); return (c ^ -1) >>> 0; };
+function zip(list) {
+  const e = new TextEncoder(), parts = [], cen = []; let off = 0;
+  for (const f of list) {
+    const n = e.encode(f.name), d = e.encode(f.content), c = crc(d);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true);
+    h.setUint32(14, c, true); h.setUint32(18, d.length, true); h.setUint32(22, d.length, true); h.setUint16(26, n.length, true);
+    parts.push(h, n, d);
+    const g = new DataView(new ArrayBuffer(46));
+    g.setUint32(0, 0x02014b50, true); g.setUint16(4, 20, true); g.setUint16(6, 20, true); g.setUint16(8, 0x0800, true);
+    g.setUint32(16, c, true); g.setUint32(20, d.length, true); g.setUint32(24, d.length, true); g.setUint16(28, n.length, true); g.setUint32(42, off, true);
+    cen.push(g, n); off += 30 + n.length + d.length;
   }
-  function updateCount() {
-    const lines = code.value.length ? code.value.split('\n').length : 0;
-    count.textContent = `${lines} líneas · ${code.value.length} caracteres`;
+  let cs = 0; cen.forEach(x => cs += x.byteLength);
+  const z = new DataView(new ArrayBuffer(22));
+  z.setUint32(0, 0x06054b50, true); z.setUint16(8, list.length, true); z.setUint16(10, list.length, true); z.setUint32(12, cs, true); z.setUint32(16, off, true);
+  return new Blob([...parts, ...cen, z], {type:'application/zip'});
+}
+//ZIP
+
+// ---------- Detección de lenguaje ----------
+const ext = n => { const m = n.match(/\.(\w+)$/); return m ? m[1].toLowerCase() : ''; };
+function detect(c) {
+  if (/<!doctype|<html|<body|<div|<h1/i.test(c)) return 'html';
+  if (/\bSystem\.out\.|^\s*(public\s+)?class\s+\w+/m.test(c) && /;\s*$/m.test(c)) return 'java';
+  if (/^\s*(def\s|from\s+\w+\s+import|import\s+\w+\s*$|print\()/m.test(c) && !/;\s*$/m.test(c)) return 'py';
+  if (/[\w.#\]-]\s*\{[^}]*:[^}]*;/.test(c) && !/function|=>|\b(const|let|var)\b/.test(c)) return 'css';
+  return 'js';
+}
+const kind = f => { const e = ext(f.name); return e ? (EXT[e] || e) : detect(f.content); };
+const fname = f => ext(f.name) ? f.name : f.name + '.' + kind(f);
+const file = () => files[cur];
+const find = n => files.find(f => f.name === n);
+const clean = n => (n || '').replace(/[\/\\]/g, '_').trim();
+
+// ---------- Estado ----------
+const save = () => { try { localStorage.setItem('ed', JSON.stringify({files, cur, deps})); } catch (_) {} };
+try {
+  const s = JSON.parse(localStorage.getItem('ed'));
+  if (s && s.files && s.files.length) { files = s.files; cur = Math.min(s.cur | 0, files.length - 1); deps = s.deps || []; }
+} catch (_) {}
+if (!files.length) files = [
+  {name:'index.html', content:START},
+  {name:'style.css', content:'body{font-family:system-ui;padding:24px}\nh1{color:#2563eb}'},
+  {name:'app.js', content:"document.getElementById('b').onclick=()=>alert('¡Funciona!');"}
+];
+const saveD = deb(save, 300);
+function note(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 2400); }
+function head() {
+  const f = file(), k = kind(f);
+  $('fileName').textContent = fname(f);
+  $('lang').textContent = LANG[k] || k.toUpperCase();
+  const n = code.value ? code.value.split('\n').length : 0;
+  $('count').textContent = n + ' líneas · ' + code.value.length + ' caracteres';
+}
+function render() {
+  $('tabs').replaceChildren(...files.map((f, i) => {
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'tab' + (i === cur ? ' on' : ''); b.textContent = f.name;
+    b.onclick = () => { cur = i; render(); save(); };
+    return b;
+  }));
+  code.value = file().content; head(); lintNow();
+}
+function add(name, content = '') {
+  name = clean(name) || 'sin-nombre'; let n = name, i = 2;
+  while (find(n)) n = name.replace(/(\.\w+)?$/, '_' + i++ + '$1');
+  files.push({name:n, content}); cur = files.length - 1; render(); save(); return n;
+}
+
+// ---------- Descargas ----------
+function dl(blob, name) {
+  const u = URL.createObjectURL(blob), a = document.createElement('a');
+  a.href = u; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 1500);
+}
+function dlFile(f) { const n = fname(f); dl(new Blob([f.content], {type:(MIME[kind(f)] || 'text/plain') + ';charset=utf-8'}), n); note('Descargando ' + n); }
+function dlZip() { dl(zip(files.map(f => ({name:fname(f), content:f.content}))), 'proyecto.zip'); note('Descargando proyecto.zip (' + files.length + ' archivos)'); }
+
+// ---------- Consejos (análisis estático básico) ----------
+function lint(f) {
+  const c = f.content, L = c.split('\n'), k = kind(f), t = [];
+  const add = (l, m, s = 'warn') => { if (t.length < 40) t.push({l, m, k:s}); };
+  const each = (re, m, s) => L.forEach((x, i) => { if (re.test(x)) add(i + 1, m, s); });
+  if (!c.trim()) return t;
+  if (['html', 'css', 'js', 'py', 'java'].includes(k)) {
+    [['{', '}'], ['(', ')'], ['[', ']']].forEach(([a, b]) => {
+      const d = c.split(a).length - c.split(b).length;
+      if (d) add(0, 'Posible error: sobran ' + Math.abs(d) + ' "' + (d > 0 ? a : b) + '" (revisa ' + a + b + ').', 'err');
+    });
   }
-  function renderPreview() {
-    preview.srcdoc = code.value || '<!doctype html><html lang="es"><body style="font-family:system-ui;padding:24px;color:#333">La vista previa aparecerá aquí.</body></html>';
-    previewSection.classList.remove('hidden');
-    document.getElementById('previewBtn').textContent = 'Ocultar vista previa';
+  if (k === 'html') {
+    if (!/<!doctype html/i.test(c)) add(1, 'Falta <!DOCTYPE html> al inicio.');
+    if (!/<html[^>]*\blang=/i.test(c)) add(1, 'Agrega lang al <html> (accesibilidad y SEO).');
+    if (!/<meta[^>]+viewport/i.test(c)) add(1, 'Falta <meta name="viewport"> para que se vea bien en móvil.');
+    if (!/<title>/i.test(c)) add(1, 'Falta <title>.');
+    each(/<img(?![^>]*\balt=)/i, '<img> sin atributo alt.');
+    each(/<(script|link)[^>]+(src|href)=["']http:\/\//i, 'Recurso por http:// (inseguro); usa https://.');
   }
-  code.addEventListener('input', updateCount);
+  if (k === 'html' || k === 'js') {
+    each(/\bvar\s+\w/, 'Usa let o const en vez de var.');
+    each(/(^|[^=!<>])==([^=]|$)/, 'Usa === en vez de == (comparación estricta).');
+    each(/\beval\s*\(/, 'eval() es inseguro; evítalo.', 'err');
+    each(/\.innerHTML\s*=/, 'innerHTML con datos del usuario causa XSS; usa textContent.');
+    each(/console\.log/, 'console.log olvidado; quítalo antes de publicar.', 'info');
+  }
+  if (k === 'html' || k === 'css') each(/!important/, '!important dificulta mantener el CSS; mejora la especificidad.');
+  if (k === 'py') {
+    each(/^\s*except\s*:/, 'except vacío oculta errores; usa except Exception as e.');
+    each(/^\s*print\s+[^(\s=]/, 'print sin paréntesis es Python 2; usa print(...).', 'err');
+    each(/^\s*from\s+\S+\s+import\s+\*/, 'Evita import *; importa solo lo necesario.');
+    each(/^\t/, 'Usa 4 espacios en vez de tabs.');
+    each(/def\s+\w+\([^)]*=\s*(\[\]|\{\})/, 'Argumento mutable por defecto ([] o {}); usa None.');
+  }
+  if (k === 'java') {
+    const m = c.match(/public\s+(?:final\s+|abstract\s+)?(?:class|interface|enum)\s+(\w+)/);
+    if (m && m[1] !== fname(f).replace(/\.java$/, '')) add(1, 'La clase pública ' + m[1] + ' debe estar en ' + m[1] + '.java; renombra el archivo.', 'err');
+    each(/printStackTrace/, 'Usa un logger en vez de printStackTrace().');
+    each(/catch\s*\(\s*(Exception|Throwable)\b/, 'Captura excepciones específicas.');
+    each(/==\s*"|"\s*==/, 'Compara Strings con .equals(), no con ==.', 'err');
+  }
+  each(/^.{121,}/, 'Línea muy larga (>120 caracteres); divídela.', 'info');
+  return t;
+}
+function lintNow() {
+  const t = lint(file());
+  $('tipN').textContent = t.length ? '(' + t.length + ')' : '';
+  $('tips').replaceChildren(...(t.length ? t : [{m:'Sin problemas detectados.', k:'info'}]).map(x => {
+    const li = document.createElement('li');
+    li.className = x.k; li.textContent = (x.l ? 'Línea ' + x.l + ' · ' : '') + x.m;
+    if (x.l) li.onclick = () => goto(x.l);
+    return li;
+  }));
+}
+const lintD = deb(lintNow, 500);
+function goto(l) {
+  const v = code.value.split('\n'); let o = 0;
+  for (let i = 0; i < l - 1; i++) o += v[i].length + 1;
+  code.scrollIntoView({block:'center'}); code.focus();
+  code.setSelectionRange(o, o + (v[l - 1] || '').length);
+  code.scrollTop = Math.max(0, (l - 3) * parseFloat(getComputedStyle(code).lineHeight));
+}
 
-  fileInput.addEventListener('change', async () => {
-    const file = fileInput.files && fileInput.files[0];
-    if (!file) return;
-    try {
-      code.value = await file.text();
-      fileName.textContent = file.name;
-      updateCount();
-      notify('Archivo cargado. Ya puedes editarlo.');
-    } catch (e) {
-      notify('No se pudo leer ese archivo.');
-    }
-    fileInput.value = '';
+// ---------- Vista previa ----------
+const key = x => x.replace(/(?!^)@.*/, '');
+function importMap() {
+  if (!deps.length) return '';
+  const m = {}; deps.forEach(d => { m[key(d)] = 'https://esm.sh/' + d; m[key(d) + '/'] = 'https://esm.sh/' + d + '/'; });
+  return '<script type="importmap">' + JSON.stringify({imports:m}) + '<\/script>';
+}
+function build(f) {
+  const h = (f && kind(f) === 'html' && f) || (kind(file()) === 'html' && file()) || find('index.html') || files.find(x => kind(x) === 'html');
+  if (!h) return '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:24px;color:#333">Crea un archivo .html para ver la vista previa.</body>';
+  let s = h.content.replace(/<link[^>]+href=["']([^"']+)["'][^>]*>/gi, (m, u) => { const x = find(u); return x ? '<style>' + x.content + '</style>' : m; });
+  s = s.replace(/<script([^>]*?)src=["']([^"']+)["']([^>]*)>\s*<\/script>/gi, (m, a, u, b) => {
+    const x = find(u); if (!x) return m;
+    return '<script' + (/^\s*(import|export)\s/m.test(x.content) ? ' type="module"' : '') + '>' + x.content.replace(/<\/script/gi, '<\\/script') + '<\/script>';
   });
+  const map = importMap();
+  return map ? s.replace(/^(\s*<!doctype[^>]*>)?/i, m => m + map) : s;
+}
+function refresh(f) { prev.srcdoc = build(f); }
+const auto = deb(() => { if (!$('p-prev').classList.contains('hidden')) refresh(); }, 700);
+function show(p) {
+  $('p-prev').classList.remove('full'); $('fullBtn').textContent = '⤢ Ver completa';
+  ['prev', 'term', 'tips'].forEach(x => $('p-' + x).classList.toggle('hidden', x !== p));
+  document.querySelectorAll('.ptabs button').forEach(b => b.classList.toggle('on', b.dataset.p === p));
+  if (p === 'prev') refresh();
+}
 
-  document.getElementById('downloadBtn').addEventListener('click', () => {
-    const blob = new Blob([code.value], {type:'text/html;charset=utf-8'});
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'index.html';
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
-    setTimeout(() => URL.revokeObjectURL(url), 1500);
-    notify('Preparando descarga de index.html');
+// ---------- Terminal y ejecución ----------
+function log(m, c) { const d = document.createElement('div'); if (c) d.className = c; d.textContent = m; out.appendChild(d); out.scrollTop = out.scrollHeight; }
+const RUN = '<script>const P=(o,e)=>parent.postMessage({o:String(o),e},"*");const F=a=>a.map(x=>{try{return typeof x==="object"?JSON.stringify(x):String(x)}catch(_){return String(x)}}).join(" ");console.log=(...a)=>P(F(a));console.error=(...a)=>P(F(a),1);console.warn=console.error;onerror=(m,s,l)=>P(m+(l?" (línea "+l+")":""),1);onunhandledrejection=e=>P(e.reason,1)<\/script>';
+function runJS(c) {
+  if (runner) { runner.fr.remove(); removeEventListener('message', runner.h); }
+  const fr = document.createElement('iframe'); fr.sandbox = 'allow-scripts'; fr.className = 'hidden';
+  const h = e => { if (e.source === fr.contentWindow && e.data && e.data.o !== undefined) log(e.data.o, e.data.e ? 'err' : ''); };
+  addEventListener('message', h); runner = {fr, h};
+  fr.srcdoc = importMap() + RUN + '<script type="module">' + c.replace(/<\/script/gi, '<\\/script') + '<\/script>';
+  document.body.appendChild(fr);
+}
+async function pyInit() {
+  if (py) return py;
+  log('Cargando Python (Pyodide, ~10 MB, solo la primera vez)…');
+  await new Promise((ok, no) => {
+    const s = document.createElement('script'); s.src = PY + 'pyodide.js'; s.onload = ok;
+    s.onerror = () => no(new Error('No se pudo descargar Pyodide (¿sin internet?).')); document.head.appendChild(s);
   });
+  py = await loadPyodide({indexURL:PY, stdout:m => log(m), stderr:m => log(m, 'err')});
+  return py;
+}
+async function runPy(f) {
+  const p = await pyInit();
+  files.filter(x => kind(x) === 'py').forEach(x => { try { p.FS.writeFile(x.name, x.content); } catch (_) {} });
+  try { await p.runPythonAsync(f.content); } catch (e) { log(String(e.message).trim().split('\n').slice(-6).join('\n'), 'err'); }
+}
+async function pip(a) {
+  const p = await pyInit(); await p.loadPackage('micropip');
+  if (a[0] === 'list') return p.runPython('import micropip\nprint(micropip.list())');
+  const n = a.slice(1).filter(x => !x.startsWith('-'));
+  if (a[0] !== 'install' || !n.length) return log('Uso: pip install <paquete> | pip list', 'err');
+  const mp = p.pyimport('micropip');
+  for (const x of n) { log('Instalando ' + x + '…'); await mp.install(x); log('✓ ' + x + ' (solo en esta sesión)'); }
+}
+function npm(a) {
+  const n = a.slice(1).filter(x => !x.startsWith('-'));
+  if (['install', 'i', 'add'].includes(a[0]) && n.length) {
+    n.forEach(x => { if (!deps.includes(x)) deps.push(x); log('✓ ' + x + ' → https://esm.sh/' + x); }); save();
+    log('Úsalo con: import ... from "' + key(n[0]) + '" en tus .js (vista previa y run).');
+  } else if (a[0] === 'ls') log(deps.join('\n') || '(sin paquetes)');
+  else if (['rm', 'uninstall'].includes(a[0])) { deps = deps.filter(x => !n.includes(x)); save(); log('Quitado.'); }
+  else log('Uso: npm install <paquete> | npm ls | npm rm <paquete>', 'err');
+}
+async function run(n) {
+  const f = n ? find(n) : file();
+  if (!f) return log('No existe: ' + n, 'err');
+  const k = kind(f);
+  if (k === 'html' || k === 'css') { show('prev'); refresh(f); }
+  else if (k === 'js') { show('term'); runJS(f.content); }
+  else if (k === 'py') { show('term'); await runPy(f); }
+  else if (k === 'java') { show('term'); log('Java no se puede ejecutar en el navegador. Descárgalo y compílalo con: javac ' + f.name, 'err'); }
+  else { show('term'); log('No sé ejecutar archivos .' + k, 'err'); }
+}
+async function exec(line) {
+  log('$ ' + line, 'cmd');
+  const [c, ...a] = line.trim().split(/\s+/); if (!c) return;
+  try {
+    if (c === 'help') log('ls · cat <f> · touch <f> · rm <f> · mv <a> <b> · run [f] (o python/node) · zip · clear\npip install <pkg> · pip list · npm install <pkg> · npm ls · npm rm <pkg>');
+    else if (c === 'ls') log(files.map(f => f.name).join('  '));
+    else if (c === 'cat') { const f = find(a[0]); f ? log(f.content) : log('No existe: ' + a[0], 'err'); }
+    else if (c === 'touch') a.forEach(n => find(n) || add(n));
+    else if (c === 'rm') a.forEach(n => {
+      const i = files.findIndex(f => f.name === n);
+      if (i < 0) log('No existe: ' + n, 'err');
+      else if (files.length < 2) log('Debe quedar un archivo.', 'err');
+      else { files.splice(i, 1); cur = Math.min(cur, files.length - 1); render(); save(); }
+    });
+    else if (c === 'mv') { const f = find(a[0]); if (!f || !clean(a[1])) log('Uso: mv <origen> <nuevo>', 'err'); else { f.name = clean(a[1]); render(); save(); } }
+    else if (c === 'clear') out.replaceChildren();
+    else if (c === 'zip') dlZip();
+    else if (['run', 'python', 'python3', 'node'].includes(c)) await run(a[0]);
+    else if (c === 'pip' || c === 'pip3') await pip(a);
+    else if (c === 'npm') npm(a);
+    else log(c + ': comando no encontrado. Escribe help.', 'err');
+  } catch (e) { log(String(e.message || e), 'err'); }
+}
 
-  document.getElementById('previewBtn').addEventListener('click', () => {
-    if (previewSection.classList.contains('hidden')) renderPreview();
-    else {
-      previewSection.classList.add('hidden');
-      document.getElementById('previewBtn').textContent = '▶ Vista previa';
-    }
-  });
-  document.getElementById('refreshBtn').addEventListener('click', renderPreview);
-  document.getElementById('clearBtn').addEventListener('click', () => {
-    if (!code.value || confirm('¿Borrar todo el contenido del editor?')) {
-      code.value = '';
-      fileName.textContent = 'Sin archivo abierto';
-      updateCount();
-      notify('Editor limpio.');
-    }
-  });
+// ---------- Editor: sangría y cierre automático ----------
+function ins(s) {
+  if (!document.execCommand('insertText', false, s)) { code.setRangeText(s, code.selectionStart, code.selectionEnd, 'end'); code.dispatchEvent(new Event('input')); }
+}
+code.addEventListener('keydown', e => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const s = code.selectionStart, t = code.selectionEnd, v = code.value;
+  if (e.key === 'Tab') { e.preventDefault(); ins('  '); }
+  else if (e.key === 'Enter') {
+    e.preventDefault();
+    const b = v.slice(v.lastIndexOf('\n', s - 1) + 1, s);
+    ins('\n' + b.match(/^\s*/)[0] + (/[{(\[:]\s*$/.test(b) ? '  ' : ''));
+  }
+  else if (s === t && v[s] === e.key && ')]}"\'`'.includes(e.key)) { e.preventDefault(); code.setSelectionRange(s + 1, s + 1); }
+  else if (s === t && PAIR[e.key] && !(/['"`]/.test(e.key) && /\w/.test(v[s - 1] || ''))) { e.preventDefault(); ins(e.key + PAIR[e.key]); code.setSelectionRange(s + 1, s + 1); }
+});
+code.addEventListener('input', () => { file().content = code.value; saveD(); head(); lintD(); auto(); });
 
-  // Evita gestos de zoom accidentales en iOS; el desplazamiento normal sigue habilitado.
-  document.addEventListener('gesturestart', e => e.preventDefault(), {passive:false});
-  document.addEventListener('gesturechange', e => e.preventDefault(), {passive:false});
-  document.addEventListener('gestureend', e => e.preventDefault(), {passive:false});
-  document.addEventListener('touchmove', e => {
-    if (e.touches && e.touches.length > 1) e.preventDefault();
-  }, {passive:false});
-  updateCount();
+// ---------- Botones ----------
+$('newBtn').onclick = () => { const n = prompt('Nombre del archivo (ej. main.py, Main.java, style.css)'); if (n) add(n); };
+$('fileInput').onchange = async e => {
+  for (const f of e.target.files) { try { add(f.name, await f.text()); } catch (_) { note('No se pudo leer ' + f.name); } }
+  e.target.value = ''; note('Archivos cargados');
+};
+$('dlBtn').onclick = () => dlFile(file());
+$('zipBtn').onclick = dlZip;
+$('runBtn').onclick = () => run();
+$('renBtn').onclick = () => { const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
+$('delBtn').onclick = () => {
+  if (files.length < 2) return note('Debe quedar al menos un archivo');
+  if (confirm('¿Borrar ' + file().name + '?')) { files.splice(cur, 1); cur = Math.max(0, cur - 1); render(); save(); }
+};
+document.querySelectorAll('.ptabs button').forEach(b => b.onclick = () => show(b.dataset.p));
+$('refBtn').onclick = () => refresh();
+$('fullBtn').onclick = () => { const f = $('p-prev').classList.toggle('full'); $('fullBtn').textContent = f ? '✕ Cerrar' : '⤢ Ver completa'; };
+cmd.addEventListener('keydown', e => { if (e.key === 'Enter') { const l = cmd.value; cmd.value = ''; exec(l); } });
+
+// Evita zoom accidental en iOS
+['gesturestart', 'gesturechange', 'gestureend'].forEach(t => document.addEventListener(t, e => e.preventDefault(), {passive:false}));
+document.addEventListener('touchmove', e => { if (e.touches && e.touches.length > 1) e.preventDefault(); }, {passive:false});
+
+log('Terminal lista. Escribe help.');
+render(); show('prev');
 })();
 </script>
 </body>
