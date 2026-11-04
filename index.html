@@ -200,9 +200,15 @@ const find = n => files.find(f => f.name === n);
 const clean = n => (n || '').replace(/\\/g, '/').split('/').map(x => x.trim()).filter(x => x && x !== '.' && x !== '..').join('/');
 
 // ---------- Estado ----------
-const save = () => {};
-try { localStorage.removeItem('ed'); } catch (_) {}
 files = [{name:'sin-titulo', content:''}];
+// Guardado persistente (IndexedDB): si la página se recarga, los archivos se restauran
+const idb = () => new Promise((ok, no) => { try { const r = indexedDB.open('editor-movil', 1); r.onupgradeneeded = () => r.result.createObjectStore('p'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); } catch (e) { no(e); } });
+const idbSet = async v => { try { const d = await idb(); d.transaction('p', 'readwrite').objectStore('p').put(v, 'proyecto'); } catch (_) {} };
+const idbGet = async () => { try { const d = await idb(); return await new Promise(ok => { const q = d.transaction('p').objectStore('p').get('proyecto'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (_) { return null; } };
+const save = () => { if (typeof flushNow === 'function') flushNow(); };
+const flushNow = () => { const blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content; if (!blank) idbSet({files, cur}); };
+addEventListener('pagehide', () => flushNow());
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
 addEventListener('beforeunload', e => { if (files.some(f => f.content)) { e.preventDefault(); e.returnValue = ''; } });
 addEventListener('error', e => log('Error: ' + e.message, 'err'));
 addEventListener('unhandledrejection', e => log('Error: ' + ((e.reason && e.reason.message) || e.reason), 'err'));
@@ -563,6 +569,8 @@ function previewBridge() {
   var mk = function () { var m = new Map(); return { get length() { return m.size; }, key: function (i) { var a = Array.from(m.keys()); return i < a.length ? a[i] : null; }, getItem: function (k) { k = String(k); return m.has(k) ? m.get(k) : null; }, setItem: function (k, v) { m.set(String(k), String(v)); }, removeItem: function (k) { m.delete(String(k)); }, clear: function () { m.clear(); } }; };
   ['localStorage', 'sessionStorage'].forEach(function (n) { try { Object.defineProperty(window, n, {configurable:true, value:mk()}); } catch (e) {} });
   try { var ck = ''; Object.defineProperty(document, 'cookie', {configurable:true, get:function () { return ck; }, set:function (v) { ck += (ck ? '; ' : '') + String(v).split(';')[0]; }}); } catch (e) {}
+  ['back', 'forward', 'go'].forEach(function (n) { try { Object.defineProperty(history, n, {configurable:true, value:function () {}}); } catch (e) {} });
+  try { window.close = function () {}; } catch (e) {}
   ['pushState', 'replaceState'].forEach(function (n) { var o = history[n]; history[n] = function (s, t, u) { try { return o.call(history, s, t, u); } catch (e) { try { return o.call(history, s, t); } catch (e2) {} } }; });
   document.addEventListener('click', function (e) {
     if (e.defaultPrevented) return;
@@ -689,14 +697,25 @@ function build(f, sub) {
   } else log('Vista previa: recursos locales vinculados correctamente (' + localUrls.size + ').');
   return '<!doctype html>\n' + doc.documentElement.outerHTML;
 }
+let expectLoads = 0, pendingRevoke = [], recoverT = [];
+function setPrev(html) { expectLoads++; prev.srcdoc = html; }
+prev.addEventListener('load', () => {
+  if (expectLoads > 0) {
+    expectLoads--;
+    if (!expectLoads) { pendingRevoke.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} }); pendingRevoke = []; }
+    return;
+  }
+  // La página de la vista previa se recargó o navegó sola: se restaura sin tocar los archivos
+  const now = Date.now(); recoverT = recoverT.filter(t => now - t < 5000);
+  if (recoverT.length >= 3) { log('Vista previa · la página se recarga en bucle; se detuvo la restauración automática.', 'err'); return; }
+  recoverT.push(now);
+  log('Vista previa · la página intentó salir o recargarse; se restauró.', 'err');
+  refresh(lastBuilt || undefined);
+});
 function refresh(f) {
   building.clear();
-  const previous = previewUrls; previewUrls = [];
-  prev.srcdoc = build(f);
-  const thisBuild = previewBuildId;
-  prev.onload = () => {
-    if (thisBuild === previewBuildId) previous.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
-  };
+  pendingRevoke = pendingRevoke.concat(previewUrls); previewUrls = [];
+  setPrev(build(f));
 }
 function previewNav(h) {
   const raw = String(h || '').trim(); let x = null;
@@ -821,11 +840,11 @@ async function run(n) { try { await run_(n); } catch (e) { show('term'); log(Str
 async function run_(n) {
   const f = n ? find(n) : file();
   if (!f) return log('No existe: ' + n, 'err');
-  if (f.data) { show('prev'); prev.srcdoc = '<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%">'; return; }
+  if (f.data) { show('prev'); setPrev('<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%">'); return; }
   const k = kind(f);
   if (k === 'html' || k === 'css') { show('prev'); refresh(f); }
-  else if (k === 'svg') { show('prev'); prev.srcdoc = '<body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#fff">' + f.content; }
-  else if (/^(md|txt|json|xml|csv)$/.test(k)) { show('prev'); prev.srcdoc = '<pre style="margin:0;padding:14px;font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word">' + f.content.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>'; }
+  else if (k === 'svg') { show('prev'); setPrev('<body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#fff">' + f.content); }
+  else if (/^(md|txt|json|xml|csv)$/.test(k)) { show('prev'); setPrev('<pre style="margin:0;padding:14px;font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word">' + f.content.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>'); }
   else if (k === 'js') { show('term'); runJS(f.content); }
   else if (k === 'py') { show('term'); await runPy(f); }
   else if (k === 'java') { show('term'); log('Java no se puede ejecutar en el navegador. Descárgalo y compílalo con: javac ' + f.name, 'err'); }
@@ -919,6 +938,13 @@ document.addEventListener('touchmove', e => { if (e.touches && e.touches.length 
 
 log('Terminal lista. Escribe help.');
 render(); show('prev');
+idbGet().then(st => {
+  const blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content;
+  if (st && Array.isArray(st.files) && st.files.length && blank) {
+    files = st.files; cur = Math.min(st.cur || 0, files.length - 1);
+    render(); note('Archivos restaurados');
+  }
+});
 })();
 </script>
 </body>
