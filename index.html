@@ -99,7 +99,7 @@ button.wide{width:100%}
         <button data-p="tips" type="button">Consejos <span id="tipN"></span></button>
       </div>
       <div id="p-prev" class="pane">
-        <iframe id="preview" title="Vista previa" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-downloads"></iframe>
+        <iframe id="preview" name="__ed_prev" title="Vista previa" sandbox="allow-scripts allow-forms allow-modals allow-popups allow-popups-to-escape-sandbox allow-downloads allow-presentation"></iframe>
         <div class="pbar"><button id="refBtn" type="button">Actualizar</button><button id="fullBtn" type="button">⤢ Ver completa</button></div>
       </div>
       <div id="p-term" class="pane hidden">
@@ -127,9 +127,14 @@ button.wide{width:100%}
 <div id="toast" class="toast hidden" role="status"></div>
 <script>
 (() => {
+if (window.name === '__ed_prev') {
+  try { parent.postMessage({__editorNested:true}, '*'); } catch (_) {}
+  document.body.textContent = 'Restaurando vista previa…';
+  return;
+}
 const $ = id => document.getElementById(id);
 const code = $('code'), out = $('out'), cmd = $('cmd'), prev = $('preview');
-const EXT = {htm:'html', mjs:'js'};
+const EXT = {htm:'html', mjs:'js', xhtml:'html', xht:'html', shtml:'html'};
 const LANG = {html:'HTML', css:'CSS', js:'JavaScript', py:'Python', java:'Java', json:'JSON', md:'Markdown', txt:'Texto'};
 const MIME = {html:'text/html', css:'text/css', js:'text/javascript', json:'application/json'};
 const IMG = {png:'image/png', jpg:'image/jpeg', jpeg:'image/jpeg', gif:'image/gif', webp:'image/webp', svg:'image/svg+xml', bmp:'image/bmp', ico:'image/x-icon', avif:'image/avif'};
@@ -412,6 +417,34 @@ function brackets(c, k) {
   }
   return st.length ? {line:st[st.length - 1].line, msg:'"' + st[st.length - 1].ch + '" sin cerrar'} : null;
 }
+function htmlChecks(f, c, add) {
+  let dom; try { dom = new DOMParser().parseFromString(c, 'text/html'); } catch (_) { return; }
+  const at = s => { const i = c.indexOf(s); return i < 0 ? 1 : c.slice(0, i).split('\n').length; };
+  if (!/<meta[^>]+charset/i.test(c)) add(1, 'Falta <meta charset="UTF-8">: los acentos pueden verse mal al publicar.');
+  const seen = new Set();
+  dom.querySelectorAll('[id]').forEach(el => { if (seen.has(el.id)) add(c.lastIndexOf('id="' + el.id + '"') < 0 ? 1 : c.slice(0, c.lastIndexOf('id="' + el.id + '"')).split('\n').length, 'id duplicado: "' + el.id + '".', 'err'); seen.add(el.id); });
+  dom.querySelectorAll('a[href^="#"]').forEach(a => { const id = a.getAttribute('href').slice(1); if (id && !dom.getElementById(id) && !dom.getElementsByName(id).length) add(at('href="#' + id + '"'), 'El enlace #' + id + ' no tiene ningún elemento con ese id.'); });
+  dom.querySelectorAll('a[target="_blank"]:not([rel*="noopener"])').forEach(a => add(at(a.getAttribute('href') || 'target="_blank"'), 'target="_blank" sin rel="noopener".', 'info'));
+  const base = f.name.split('/').slice(0, -1).join('/'), done = new Set();
+  dom.querySelectorAll('[src],[href],[poster]').forEach(el => ['src', 'href', 'poster'].forEach(an => {
+    const v = el.getAttribute(an);
+    if (!v || done.has(v) || /^(#|data:|blob:|https?:|\/\/|mailto:|tel:|javascript:|\?)/i.test(v)) return;
+    done.add(v);
+    if (/^(file:|[a-z]:[\\/])/i.test(v)) return add(at(v), 'Ruta de tu equipo: "' + v + '". No funcionará al publicar.', 'err');
+    if (v.includes('\\')) add(at(v), 'Ruta con "\\": usa "/" ("' + v + '").', 'err');
+    if (v[0] === '/') add(at(v), 'Ruta absoluta "' + v + '": falla en GitHub Pages de proyecto; usa ruta relativa.');
+    const p = pathNorm(v, base); if (!p) return;
+    if (!files.some(x => clean(x.name) === p || fname(x) === p)) {
+      const ci = files.find(x => clean(x.name).toLowerCase() === p.toLowerCase());
+      add(at(v), ci ? 'Mayúsculas distintas: "' + v + '" vs "' + ci.name + '". GitHub distingue mayúsculas.' : 'No se encuentra "' + v + '" entre los archivos abiertos (usa Abrir carpeta).', 'err');
+    }
+  }));
+  const txt = c.replace(/<!--[\s\S]*?-->/g, '').replace(/<(script|style)\b[\s\S]*?<\/\1>/gi, '');
+  ['div', 'span', 'section', 'main', 'header', 'footer', 'nav', 'ul', 'ol', 'table', 'form', 'button', 'a'].forEach(t => {
+    const o = (txt.match(new RegExp('<' + t + '(?=[\\s>])', 'gi')) || []).length, cl = (txt.match(new RegExp('</' + t + '\\s*>', 'gi')) || []).length;
+    if (o !== cl) add(1, '<' + t + '>: ' + o + ' abiertas y ' + cl + ' cerradas (posible etiqueta sin cerrar).', 'err');
+  });
+}
 function lint(f) {
   const c = f.content, L = c.split('\n'), k = kind(f), t = [];
   const add = (l, m, s = 'warn') => { if (t.length < 40) t.push({l, m, k:s}); };
@@ -426,6 +459,7 @@ function lint(f) {
     if (!/<meta[^>]+viewport/i.test(c)) add(1, 'Falta <meta name="viewport"> para que se vea bien en móvil.');
     if (!/<title>/i.test(c)) add(1, 'Falta <title>.');
     each(/<img(?![^>]*\balt=)/i, '<img> sin atributo alt.');
+    htmlChecks(f, c, add);
     each(/<(script|link)[^>]+(src|href)=["']http:\/\//i, 'Recurso por http:// (inseguro); usa https://.');
   }
   if (k === 'html' || k === 'js') {
@@ -476,7 +510,8 @@ function goto(l) {
 
 // ---------- Vista previa: proyecto local con rutas y recursos ----------
 const key = x => x.replace(/(?!^)@.*/, '');
-let previewUrls = [], previewBuildId = 0;
+let previewUrls = [], previewBuildId = 0, lastBuilt = null;
+const building = new Set();
 function importMap() {
   if (!deps.length) return '';
   const m = {}; deps.forEach(d => { m[key(d)] = 'https://esm.sh/' + d; m[key(d) + '/'] = 'https://esm.sh/' + d + '/'; });
@@ -522,11 +557,56 @@ function rewriteCss(css, owner, urlOf, missing) {
   });
   return css;
 }
-function build(f) {
+
+function previewBridge() {
+  var send = function (type, message, href) { try { parent.postMessage({__editorPreview:true, type:type, message:String(message || ''), href:href}, '*'); } catch (_) {} };
+  var mk = function () { var m = new Map(); return { get length() { return m.size; }, key: function (i) { var a = Array.from(m.keys()); return i < a.length ? a[i] : null; }, getItem: function (k) { k = String(k); return m.has(k) ? m.get(k) : null; }, setItem: function (k, v) { m.set(String(k), String(v)); }, removeItem: function (k) { m.delete(String(k)); }, clear: function () { m.clear(); } }; };
+  ['localStorage', 'sessionStorage'].forEach(function (n) { try { Object.defineProperty(window, n, {configurable:true, value:mk()}); } catch (e) {} });
+  try { var ck = ''; Object.defineProperty(document, 'cookie', {configurable:true, get:function () { return ck; }, set:function (v) { ck += (ck ? '; ' : '') + String(v).split(';')[0]; }}); } catch (e) {}
+  ['pushState', 'replaceState'].forEach(function (n) { var o = history[n]; history[n] = function (s, t, u) { try { return o.call(history, s, t, u); } catch (e) { try { return o.call(history, s, t); } catch (e2) {} } }; });
+  document.addEventListener('click', function (e) {
+    if (e.defaultPrevented) return;
+    var a = e.target && e.target.closest ? e.target.closest('a[href],area[href]') : null; if (!a) return;
+    var h = a.getAttribute('href') || '';
+    if (/^(javascript:|mailto:|tel:|blob:|data:)/i.test(h)) return;
+    e.preventDefault();
+    if (h.charAt(0) === '#') {
+      var id = h.slice(1); try { id = decodeURIComponent(id); } catch (_) {}
+      try { location.hash = h; } catch (_) {}
+      var t = id && (document.getElementById(id) || document.getElementsByName(id)[0]);
+      if (t) t.scrollIntoView(); else if (!id) window.scrollTo(0, 0);
+      return;
+    }
+    if (/^https?:/i.test(h) || h.indexOf('//') === 0) { window.open(h, '_blank', 'noopener'); return; }
+    send('nav', '', h);
+  });
+  document.addEventListener('submit', function (e) {
+    if (e.defaultPrevented) return;
+    if (e.target && String(e.target.method).toLowerCase() === 'dialog') return;
+    e.preventDefault(); send('info', 'Formulario enviado: bloqueado en la vista previa (no hay servidor).');
+  });
+  try { if (window.navigation) navigation.addEventListener('navigate', function (ev) {
+    if (ev.hashChange || ev.downloadRequest || !ev.cancelable || (ev.navigationType !== 'push' && ev.navigationType !== 'replace')) return;
+    var u = ev.destination.url || ''; if (/^(blob:|data:|about:)/i.test(u)) return;
+    ev.preventDefault(); send('nav', '', u);
+  }); } catch (e) {}
+  addEventListener('error', function (e) {
+    var t = e.target;
+    if (t && t !== window && (t.src || t.href)) send('error', 'No se pudo cargar un recurso: ' + (t.src || t.href));
+    else send('error', e.message || 'Error de JavaScript');
+  }, true);
+  addEventListener('unhandledrejection', function (e) { send('error', 'Promesa rechazada: ' + ((e.reason && e.reason.message) || e.reason)); });
+  var oe = console.error.bind(console); console.error = function () { oe.apply(null, arguments); send('console', Array.prototype.join.call(arguments, ' ')); };
+  addEventListener('message', function (e) { if (e.data && e.data.__editorPreview && e.source !== window && parent !== window) { try { parent.postMessage(e.data, '*'); } catch (_) {} } });
+  addEventListener('DOMContentLoaded', function () { send('ready', 'Vista previa cargada'); });
+}
+function build(f, sub) {
   const h = (f && kind(f) === 'html' && f) || (kind(file()) === 'html' && file()) || find('index.html') || files.find(x => kind(x) === 'html');
   if (!h) return '<!doctype html><meta charset="utf-8"><body style="font-family:system-ui;padding:24px;color:#333">Abre el archivo HTML principal o una carpeta completa del proyecto.</body>';
 
-  const id = ++previewBuildId, missing = new Set(), localUrls = new Map();
+  if (building.has(h)) return '<!doctype html><body style="font-family:system-ui;padding:24px">Referencia circular entre archivos HTML.';
+  building.add(h); if (!sub) lastBuilt = h;
+  const id = sub ? previewBuildId : ++previewBuildId, missing = new Set(), localUrls = new Map();
   const urlOf = x => {
     if (localUrls.has(x)) return localUrls.get(x);
     let u;
@@ -539,6 +619,8 @@ function build(f) {
   };
   const parser = new DOMParser();
   const doc = parser.parseFromString(h.content, 'text/html');
+  // Elementos que sacarían la página de la vista previa o la bloquearían
+  doc.querySelectorAll('base, meta[http-equiv="refresh" i], meta[http-equiv="Content-Security-Policy" i]').forEach(el => el.remove());
 
   // CSS local: se convierte en Blob y sus imágenes/fuentes se resuelven dentro del proyecto.
   doc.querySelectorAll('link[href]').forEach(el => {
@@ -567,11 +649,17 @@ function build(f) {
     ['src','href','poster','data-src'].forEach(attr => {
       if (!el.hasAttribute(attr)) return;
       const v = el.getAttribute(attr) || '';
-      if (/^(https?:|\/\/|data:|blob:|#|mailto:|tel:|javascript:)/i.test(v)) return;
+      if (/^\/\//.test(v)) { el.setAttribute(attr, 'https:' + v); return; }
+      if (/^http:\/\//i.test(v) && el.tagName !== 'A') { el.setAttribute(attr, 'https://' + v.slice(7)); return; }
+      if (/^(https?:|data:|blob:|#|mailto:|tel:|javascript:)/i.test(v)) return;
       // Los estilos y scripts ya fueron tratados arriba.
       const a = assetFor(v, h.name);
-      if (a) el.setAttribute(attr, urlOf(a));
-      else if (!/^(about:|javascript:)/i.test(v)) missing.add(v);
+      // Enlaces <a>: las páginas HTML las resuelve el puente (navegación segura); otros archivos van como Blob
+      if (el.tagName === 'A' || el.tagName === 'AREA') { if (a && kind(a) !== 'html') el.setAttribute(attr, urlOf(a)); return; }
+      if (a && /^(IFRAME|FRAME)$/.test(el.tagName) && kind(a) === 'html' && !a.data) {
+        const u = URL.createObjectURL(new Blob([build(a, true)], {type:'text/html'})); previewUrls.push(u); el.setAttribute(attr, u);
+      } else if (a) el.setAttribute(attr, urlOf(a));
+      else if (v && !/^(about:|javascript:)/i.test(v)) missing.add(v);
     });
     if (el.hasAttribute('srcset')) {
       const next = el.getAttribute('srcset').split(',').map(part => {
@@ -587,35 +675,13 @@ function build(f) {
 
   // Reescribe recursos CSS inline que aparezcan en atributos style.
   doc.querySelectorAll('[style]').forEach(el => el.setAttribute('style', rewriteCss(el.getAttribute('style'), h.name, urlOf, missing)));
-  const bridge = `<script>
-    // Puente de diagnóstico y almacenamiento aislado para la vista previa.
-    const send=(type,message)=>parent.postMessage({__editorPreview:true,type,message:String(message||'')},'*');
-    const mem=new Map();
-    const previewStorage={
-      get length(){return mem.size;},
-      key(i){return Array.from(mem.keys())[i]??null;},
-      getItem(k){k=String(k);return mem.has(k)?mem.get(k):null;},
-      setItem(k,v){mem.set(String(k),String(v));},
-      removeItem(k){mem.delete(String(k));},
-      clear(){mem.clear();}
-    };
-    try{Object.defineProperty(window,'localStorage',{configurable:true,value:previewStorage});}
-    catch(e){send('error','No se pudo habilitar almacenamiento temporal: '+e.message);}
-    addEventListener('error',e=>{
-      const t=e.target;
-      if(t&&t!==window&&('src' in t||'href' in t)){
-        send('error','No se pudo cargar un recurso: '+(t.src||t.href||t.tagName));
-      }else send('error',e.message||'Error de JavaScript');
-    },true);
-    addEventListener('unhandledrejection',e=>send('error','Promesa rechazada: '+(e.reason&&e.reason.message||e.reason)));
-    const oldError=console.error.bind(console);
-    console.error=(...a)=>{oldError(...a);send('console',a.join(' '));};
-    addEventListener('DOMContentLoaded',()=>send('ready','Vista previa cargada'));
-  <\/script>`;
+  const bridge = '<script>(' + previewBridge.toString() + ')()<\/script>';
   const map = importMap();
   const head = doc.head || doc.documentElement.insertBefore(doc.createElement('head'), doc.body || null);
-  if (map) head.insertAdjacentHTML('beforeend', map);
-  head.insertAdjacentHTML('beforeend', bridge);
+  // Al PRINCIPIO del head: así el almacenamiento y la navegación segura existen antes que cualquier script de la página
+  head.insertAdjacentHTML('afterbegin', bridge + map);
+  building.delete(h);
+  if (sub) return '<!doctype html>\n' + doc.documentElement.outerHTML;
   if (missing.size) {
     const sample = Array.from(missing).slice(0, 12);
     log('Vista previa: no se encontraron ' + missing.size + ' recurso(s) local(es): ' + sample.join(', ') + (missing.size > sample.length ? '…' : ''), 'err');
@@ -624,6 +690,7 @@ function build(f) {
   return '<!doctype html>\n' + doc.documentElement.outerHTML;
 }
 function refresh(f) {
+  building.clear();
   const previous = previewUrls; previewUrls = [];
   prev.srcdoc = build(f);
   const thisBuild = previewBuildId;
@@ -631,13 +698,27 @@ function refresh(f) {
     if (thisBuild === previewBuildId) previous.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} });
   };
 }
-if (!window.__editorPreviewListener) {
-  window.__editorPreviewListener = true;
-  addEventListener('message', e => {
-    if (e.source !== prev.contentWindow || !e.data || !e.data.__editorPreview) return;
-    log('Vista previa · ' + e.data.message, 'err');
-  });
+function previewNav(h) {
+  const raw = String(h || '').trim(); let x = null;
+  try { x = new URL(raw, location.href); } catch (_) {}
+  const abs = /^[a-z][\w+.-]*:/i.test(raw);
+  if (abs && x && /^https?:$/.test(x.protocol) && x.origin !== location.origin) { window.open(x.href, '_blank', 'noopener'); return; }
+  let p = abs && x ? x.pathname.split('/').pop() : raw; try { p = decodeURIComponent(p); } catch (_) {}
+  const bare = p.split(/[?#]/)[0];
+  if (!bare) return; // "?x=1" o vacío: se queda en la misma página
+  const t = assetFor(bare, lastBuilt ? lastBuilt.name : '') || (/^(\.\/?|\/)$/.test(bare) ? (find('index.html') || files.find(x => kind(x) === 'html')) : null);
+  if (t && !t.data && kind(t) === 'html') { refresh(t); log('Vista previa → ' + fname(t)); }
+  else if (t) note('Enlace a ' + fname(t) + ' (no es una página HTML)');
+  else log('Vista previa · el enlace "' + raw + '" apunta a un archivo que no está cargado.', 'err');
 }
+addEventListener('message', e => {
+  const d = e.data;
+  if (!d || e.source !== prev.contentWindow) return;
+  if (d.__editorNested) { log('Vista previa · un enlace intentó cargar el editor dentro de la vista; se restauró.', 'err'); refresh(); return; }
+  if (!d.__editorPreview) return;
+  if (d.type === 'nav') previewNav(d.href);
+  else if (d.type !== 'ready') log('Vista previa · ' + d.message, d.type === 'info' ? '' : 'err');
+});
 const auto = deb(() => { if (!$('p-prev').classList.contains('hidden')) refresh(); }, 700);
 function show(p) {
   $('p-prev').classList.remove('full'); $('fullBtn').textContent = '⤢ Ver completa';
@@ -743,6 +824,8 @@ async function run_(n) {
   if (f.data) { show('prev'); prev.srcdoc = '<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%">'; return; }
   const k = kind(f);
   if (k === 'html' || k === 'css') { show('prev'); refresh(f); }
+  else if (k === 'svg') { show('prev'); prev.srcdoc = '<body style="margin:0;display:grid;place-items:center;min-height:100vh;background:#fff">' + f.content; }
+  else if (/^(md|txt|json|xml|csv)$/.test(k)) { show('prev'); prev.srcdoc = '<pre style="margin:0;padding:14px;font:14px/1.5 ui-monospace,monospace;white-space:pre-wrap;word-break:break-word">' + f.content.replace(/&/g, '&amp;').replace(/</g, '&lt;') + '</pre>'; }
   else if (k === 'js') { show('term'); runJS(f.content); }
   else if (k === 'py') { show('term'); await runPy(f); }
   else if (k === 'java') { show('term'); log('Java no se puede ejecutar en el navegador. Descárgalo y compílalo con: javac ' + f.name, 'err'); }
@@ -818,7 +901,7 @@ $('zipOrd').onclick = () => dlZip();
 $('zipRaw').onclick = () => dlZip(true);
 $('exeZip').onclick = dlExePackage;
 $('dlSheet').onclick = e => { if (e.target === $('dlSheet')) closeDl(); };
-addEventListener('keydown', e => { if (e.key === 'Escape') closeDl(); });
+addEventListener('keydown', e => { if (e.key === 'Escape') { closeDl(); if ($('p-prev').classList.contains('full')) $('fullBtn').click(); } });
 $('runBtn').onclick = () => run();
 $('renBtn').onclick = () => { const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
 $('delBtn').onclick = () => {
