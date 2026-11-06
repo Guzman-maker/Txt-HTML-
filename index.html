@@ -60,6 +60,16 @@ iframe{flex:1;width:100%;border:0;background:#fff}
 .dl-row button{flex:none;width:52px}
 .mut{color:var(--muted);font-size:13px;margin:14px 0 6px}
 #dlTree{margin:0 0 12px;padding:10px;background:#080d18;border:1px solid var(--line);border-radius:10px;font:13px/1.5 ui-monospace,Menlo,Consolas,monospace;overflow:auto;max-height:22vh}
+.flist{margin:0 0 10px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}
+.flist>summary{min-height:40px;display:flex;align-items:center;padding:0 12px;font-weight:600;font-size:13px;cursor:pointer}
+#flBody{max-height:30vh;overflow:auto;padding:0 8px 8px}
+.fl-row{display:flex;align-items:center;gap:6px;margin-top:4px}
+.fl-row button{min-height:36px;font-size:13px;padding:4px 10px}
+.fl-row .fl-open{flex:1;text-align:left;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.fl-row .fl-open.on{border-color:var(--accent);color:var(--accent)}
+.fl-row .fl-x{flex:none;width:40px;padding:4px 0}
+.fl-dir{font-size:12px;color:var(--muted)}
+.fl-dir .fl-open{background:transparent;border-style:dashed;color:var(--muted)}
 .row{display:flex;gap:8px;margin-bottom:8px}.row button{flex:1}
 button.wide{width:100%}
 .hidden{display:none!important}
@@ -84,7 +94,9 @@ button.wide{width:100%}
     <button id="runBtn" type="button">▶ Ejecutar</button>
     <button id="renBtn" type="button">Renombrar</button>
     <button id="delBtn" type="button">Borrar</button>
+    <button id="delAllBtn" type="button">Borrar todo</button>
   </div>
+  <details class="flist" id="flist"><summary id="flSum">Archivos</summary><div id="flBody"></div></details>
   <div class="status"><span id="lang"></span><span id="count"></span></div>
   <div class="workspace">
     <section class="editor-wrap">
@@ -206,7 +218,7 @@ const idb = () => new Promise((ok, no) => { try { const r = indexedDB.open('edit
 const idbSet = async v => { try { const d = await idb(); d.transaction('p', 'readwrite').objectStore('p').put(v, 'proyecto'); } catch (_) {} };
 const idbGet = async () => { try { const d = await idb(); return await new Promise(ok => { const q = d.transaction('p').objectStore('p').get('proyecto'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (_) { return null; } };
 const save = () => { if (typeof flushNow === 'function') flushNow(); };
-const flushNow = () => { const blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content; if (!blank) idbSet({files, cur}); };
+const flushNow = () => { const blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content; idbSet(blank ? null : {files, cur}); };
 addEventListener('pagehide', () => flushNow());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
 addEventListener('beforeunload', e => { if (files.some(f => f.content)) { e.preventDefault(); e.returnValue = ''; } });
@@ -236,12 +248,43 @@ function render() {
   const im = !!file().data;
   code.classList.toggle('hidden', im); $('gut').classList.toggle('hidden', im); $('imgv').classList.toggle('hidden', !im);
   if (im) $('imgv').firstElementChild.src = file().data;
-  code.value = file().content; head(); lintNow(); auto();
+  code.value = file().content; fileList(); head(); lintNow(); auto();
+}
+let bulk = false;
+const isBlank = () => files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content && !files[0].data;
+function removeAt(i) {
+  files.splice(i, 1);
+  if (!files.length) files.push({name:'sin-titulo', content:''});
+  cur = Math.max(0, Math.min(cur > i ? cur - 1 : cur, files.length - 1));
+  render(); save();
+}
+function removeMany(pred) {
+  files = files.filter(f => !pred(f));
+  if (!files.length) files.push({name:'sin-titulo', content:''});
+  cur = Math.min(cur, files.length - 1); render(); save();
+}
+function fileList() {
+  const body = $('flBody'), blank = isBlank();
+  $('flSum').textContent = blank ? 'Archivos (vacío)' : 'Archivos (' + files.length + ')';
+  const idx = files.map((f, i) => i).sort((a, b) => files[a].name.localeCompare(files[b].name));
+  const out = []; let dir = null;
+  const row = (cls, label, open, del, on) => {
+    const r = document.createElement('div'), o = document.createElement('button'), x = document.createElement('button');
+    r.className = 'fl-row ' + cls; o.type = x.type = 'button';
+    o.className = 'fl-open' + (on ? ' on' : ''); o.textContent = label; o.onclick = open;
+    x.className = 'fl-x'; x.textContent = '✕'; x.onclick = del; r.append(o, x); return r;
+  };
+  idx.forEach(i => {
+    const f = files[i], parts = f.name.split('/'), d = parts.slice(0, -1).join('/');
+    if (d !== dir) { dir = d; if (d) out.push(row('fl-dir', '📁 ' + d + '/', () => {}, () => { if (confirm('¿Borrar la carpeta ' + d + ' y todo su contenido?')) removeMany(g => g.name.startsWith(d + '/')); }, false)); }
+    out.push(row('', (d ? '   ' : '') + parts[parts.length - 1], () => { cur = i; render(); save(); }, () => { if (confirm('¿Borrar ' + f.name + '?')) removeAt(i); }, i === cur));
+  });
+  body.replaceChildren(...(blank ? [] : out));
 }
 function add(name, content = '', extra) {
   name = clean(name) || 'sin-nombre'; let n = name, i = 2;
   while (find(n)) n = name.replace(/(\.\w+)?$/, '_' + i++ + '$1');
-  files.push(Object.assign({name:n, content}, extra)); cur = files.length - 1; render(); save(); return n;
+  files.push(Object.assign({name:n, content}, extra)); cur = files.length - 1; if (!bulk) { render(); save(); } return n;
 }
 
 // ---------- Descargas ----------
@@ -854,16 +897,17 @@ async function exec(line) {
   log('$ ' + line, 'cmd');
   const [c, ...a] = line.trim().split(/\s+/); if (!c) return;
   try {
-    if (c === 'help') log('ls · cat <f> · touch <f> · rm <f> · mv <a> <b> · run [f] (o python/node) · zip (ordenado) · zip --plano · clear\npip install <pkg> · pip list · npm install <pkg> · npm ls · npm rm <pkg>');
+    if (c === 'help') log('ls · cat <f> · touch <f> · rm <f> · rm --all · mv <a> <b> · run [f] (o python/node) · zip (ordenado) · zip --plano · clear\npip install <pkg> · pip list · npm install <pkg> · npm ls · npm rm <pkg>');
     else if (c === 'ls') log(files.map(f => f.name).join('  '));
     else if (c === 'cat') { const f = find(a[0]); f ? log(f.data ? '(imagen, ' + f.bytes.length + ' bytes)' : f.content) : log('No existe: ' + a[0], 'err'); }
     else if (c === 'touch') a.forEach(n => find(n) || add(n));
+    else if (c === 'rm' && a[0] === '--all') removeMany(() => true);
     else if (c === 'rm') a.forEach(n => {
       const i = files.findIndex(f => f.name === n);
       if (i < 0) log('No existe: ' + n, 'err');
-      else if (files.length < 2) log('Debe quedar un archivo.', 'err');
-      else { files.splice(i, 1); cur = Math.min(cur, files.length - 1); render(); save(); }
+      else removeAt(i);
     });
+    if (c === 'rm' && !a.length) log('Uso: rm <archivo> · rm --all (borra todo)', 'err');
     else if (c === 'mv') { const f = find(a[0]); if (!f || !clean(a[1])) log('Uso: mv <origen> <nuevo>', 'err'); else { f.name = clean(a[1]); render(); save(); } }
     else if (c === 'clear') out.replaceChildren();
     else if (c === 'zip') dlZip(a[0] === '--plano');
@@ -895,7 +939,8 @@ code.addEventListener('scroll', () => { $('gut').scrollTop = code.scrollTop; });
 
 // ---------- Botones ----------
 async function load(list) {
-  const msgs = [], blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content;
+  const msgs = [], blank = isBlank();
+  bulk = true;
   for (const f of list) {
     let n = clean(f.webkitRelativePath ? f.webkitRelativePath.replace(/^[^/]+\//, '') : f.name);
     try {
@@ -909,8 +954,12 @@ async function load(list) {
       add(n, c);
     } catch (_) { msgs.push('No se pudo leer ' + n); }
   }
-  if (blank && files.length > 1) { files.shift(); cur = Math.max(0, cur - 1); render(); }
-  note(msgs.length ? msgs.join(' · ') : 'Archivos cargados');
+  bulk = false;
+  if (blank && files.length > 1) { files.shift(); }
+  cur = Math.max(0, Math.min(blank ? 0 : cur, files.length - 1));
+  if (list.length) { $('flist').open = list.length > 1; }
+  render(); save();
+  note(msgs.length ? msgs.join(' · ') : list.length + ' archivo(s) cargados');
 }
 $('fileInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
 $('folderInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
@@ -924,8 +973,12 @@ addEventListener('keydown', e => { if (e.key === 'Escape') { closeDl(); if ($('p
 $('runBtn').onclick = () => run();
 $('renBtn').onclick = () => { const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
 $('delBtn').onclick = () => {
-  if (files.length < 2) return note('Debe quedar al menos un archivo');
-  if (confirm('¿Borrar ' + file().name + '?')) { files.splice(cur, 1); cur = Math.max(0, cur - 1); render(); save(); }
+  if (isBlank()) return note('Ya está vacío: escribe aquí o abre un archivo');
+  if (confirm('¿Borrar ' + file().name + '?')) removeAt(cur);
+};
+$('delAllBtn').onclick = () => {
+  if (isBlank()) return note('Ya está vacío');
+  if (confirm('¿Borrar TODOS los archivos (' + files.length + ')?')) { removeMany(() => true); note('Todo borrado'); }
 };
 document.querySelectorAll('.ptabs button').forEach(b => b.onclick = () => show(b.dataset.p));
 $('refBtn').onclick = () => refresh();
