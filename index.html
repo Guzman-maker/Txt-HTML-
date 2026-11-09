@@ -590,14 +590,30 @@ function pathNorm(path, base) {
   return parts.join('/');
 }
 function assetFor(url, owner) {
-  const p = pathNorm(url, (owner || '').split('/').slice(0, -1).join('/'));
+  const raw = String(url || '').trim();
+  const p = pathNorm(raw, (owner || '').split('/').slice(0, -1).join('/'));
   if (!p) return null;
-  let f = files.find(x => clean(x.name) === p || fname(x) === p);
-  if (!f && url.startsWith('/')) f = files.find(x => clean(x.name) === p.split('/').slice(1).join('/'));
-  if (!f) f = files.find(x => clean(x.name).endsWith('/' + p) || fname(x).endsWith('/' + p));
-  if (!f && !p.includes('/')) f = files.find(x => fname(x).split('/').pop() === p || clean(x.name).split('/').pop() === p);
+  const norm = v => clean(v).replace(/^\/+/, '').toLowerCase();
+  const target = norm(p);
+  let f = files.find(x => norm(x.name) === target || norm(fname(x)) === target);
+  // Rutas absolutas de proyectos web (/assets/..., /src/...) se interpretan
+  // desde la raíz importada, no desde la raíz del teléfono.
+  if (!f && raw.startsWith('/')) {
+    const rootPath = norm(raw);
+    f = files.find(x => norm(x.name) === rootPath || norm(fname(x)) === rootPath);
+  }
+  if (!f) f = files.find(x => norm(x.name).endsWith('/' + target) || norm(fname(x)).endsWith('/' + target));
+  if (!f && !target.includes('/')) f = files.find(x => norm(fname(x)).split('/').pop() === target || norm(x.name).split('/').pop() === target);
+  // Algunos repositorios omiten la extensión en importaciones JS.
+  if (!f && !/\.[a-z0-9]+$/i.test(target)) {
+    const variants = [target + '.js', target + '.mjs', target + '.cjs', target + '.json',
+      target + '.ts', target + '.tsx', target + '.jsx',
+      target + '/index.js', target + '/index.mjs'];
+    f = files.find(x => variants.includes(norm(fname(x))) || variants.some(v => norm(fname(x)).endsWith('/' + v)));
+  }
   return f || null;
 }
+
 function previewMime(f) {
   const e = ext(fname(f));
   return f.mime || IMG[e] || MIME[e] || (e === 'svg' ? 'image/svg+xml' : e === 'woff' ? 'font/woff' : e === 'woff2' ? 'font/woff2' : e === 'ttf' ? 'font/ttf' : e === 'otf' ? 'font/otf' : e === 'json' ? 'application/json' : e === 'html' ? 'text/html' : e === 'css' ? 'text/css' : e === 'js' || e === 'mjs' ? 'text/javascript' : 'application/octet-stream');
@@ -619,6 +635,18 @@ function rewriteCss(css, owner, urlOf, missing) {
   return css;
 }
 
+function rewriteJs(code, owner, urlOf, missing) {
+  // Reescribe imports locales para que los módulos no intenten resolverlos
+  // respecto de una URL blob (donde las rutas relativas originales no existen).
+  const re = /(\b(?:from\s*|import\s*\(\s*|import\s+))(["'])([^"']+)\2/g;
+  return code.replace(re, (m, lead, quote, spec) => {
+    if (!/^\.{1,2}\//.test(spec) && !spec.startsWith('/')) return m;
+    const dep = assetFor(spec, owner);
+    if (!dep) { missing.add(spec); return m; }
+    if (!['js','mjs','json'].includes(ext(fname(dep)))) return m;
+    return lead + quote + urlOf(dep) + quote;
+  });
+}
 function previewBridge() {
   var send = function (type, message, href) { try { parent.postMessage({__editorPreview:true, type:type, message:String(message || ''), href:href}, '*'); } catch (_) {} };
   var mk = function () { var m = new Map(); return { get length() { return m.size; }, key: function (i) { var a = Array.from(m.keys()); return i < a.length ? a[i] : null; }, getItem: function (k) { k = String(k); return m.has(k) ? m.get(k) : null; }, setItem: function (k, v) { m.set(String(k), String(v)); }, removeItem: function (k) { m.delete(String(k)); }, clear: function () { m.clear(); } }; };
@@ -675,7 +703,14 @@ function build(f, sub) {
     let u;
     if (x.data) u = x.data;
     else {
-      const blob = x.bytes ? new Blob([x.bytes], {type:previewMime(x)}) : new Blob([x.content || ''], {type:previewMime(x) + (previewMime(x).startsWith('text/') || previewMime(x).includes('javascript') ? ';charset=utf-8' : '')});
+      let content = x.content || '';
+      const e = ext(fname(x));
+      if (['js','mjs'].includes(e)) content = rewriteJs(content, x.name, urlOf, missing);
+      if (e === 'css') content = rewriteCss(content, x.name, urlOf, missing);
+      const mime = previewMime(x);
+      const blob = x.bytes && !['js','mjs','css'].includes(e)
+        ? new Blob([x.bytes], {type:mime})
+        : new Blob([content], {type:mime + (mime.startsWith('text/') || mime.includes('javascript') ? ';charset=utf-8' : '')});
       u = URL.createObjectURL(blob); previewUrls.push(u);
     }
     localUrls.set(x, u); return u;
@@ -698,7 +733,14 @@ function build(f, sub) {
   });
   doc.querySelectorAll('style').forEach(el => { el.textContent = rewriteCss(el.textContent, h.name, urlOf, missing); });
 
-  // JavaScript local. Se conserva el tipo del script (module/defer/async) y se carga desde Blob.
+  // Imports de módulos escritos directamente dentro del HTML.
+  doc.querySelectorAll('script:not([src])').forEach(el => {
+    if ((el.getAttribute('type') || '').toLowerCase() === 'module') {
+      el.textContent = rewriteJs(el.textContent, h.name, urlOf, missing);
+    }
+  });
+
+  // JavaScript local. También se reescriben imports relativos dentro de módulos.
   doc.querySelectorAll('script[src]').forEach(el => {
     const src = el.getAttribute('src') || '';
     if (/^(https?:|\/\/|data:|blob:)/i.test(src)) return;
