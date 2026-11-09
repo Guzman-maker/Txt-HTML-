@@ -647,8 +647,52 @@ function rewriteJs(code, owner, urlOf, missing) {
     return lead + quote + urlOf(dep) + quote;
   });
 }
-function previewBridge() {
+function previewBridge(assetMap) {
   var send = function (type, message, href) { try { parent.postMessage({__editorPreview:true, type:type, message:String(message || ''), href:href}, '*'); } catch (_) {} };
+  // Hace disponibles también los recursos que el JavaScript del sitio agrega
+  // después de cargar la página mediante innerHTML o setAttribute.
+  assetMap = assetMap || {};
+  var resolveAsset = function (value) {
+    var raw = String(value || '').trim();
+    if (!raw || /^(data:|blob:|https?:|\/\/|#|mailto:|tel:|javascript:)/i.test(raw)) return raw;
+    var cleanPath = raw.split(/[?#]/)[0].replace(/\\/g, '/');
+    try { cleanPath = decodeURIComponent(cleanPath); } catch (e) {}
+    cleanPath = cleanPath.replace(/^\.\//, '').replace(/^\/+/, '').toLowerCase();
+    var base = cleanPath.split('/').pop();
+    return assetMap[cleanPath] || assetMap[base] || raw;
+  };
+  var nativeInnerHTML = Object.getOwnPropertyDescriptor(Element.prototype, 'innerHTML');
+  var fixMarkup = function (markup) {
+    var template = document.createElement('template');
+    if (nativeInnerHTML && nativeInnerHTML.set) nativeInnerHTML.set.call(template, String(markup));
+    template.content.querySelectorAll('[src],[href],[poster],[data-src],[srcset],[style]').forEach(function (el) {
+      ['src','href','poster','data-src'].forEach(function (attr) {
+        if (el.hasAttribute(attr)) el.setAttribute(attr, resolveAsset(el.getAttribute(attr)));
+      });
+      if (el.hasAttribute('srcset')) {
+        el.setAttribute('srcset', el.getAttribute('srcset').split(',').map(function (part) {
+          var bits = part.trim().split(/\\s+/); if (bits[0]) bits[0] = resolveAsset(bits[0]); return bits.join(' ');
+        }).join(', '));
+      }
+      if (el.hasAttribute('style')) el.setAttribute('style', el.getAttribute('style').replace(/url\\(\\s*(['"]?)([^)'"]+)\\1\\s*\\)/gi, function (m, q, u) { return 'url("' + resolveAsset(u) + '")'; }));
+    });
+    return nativeInnerHTML && nativeInnerHTML.get ? nativeInnerHTML.get.call(template) : String(markup);
+  };
+  try {
+    var inner = nativeInnerHTML;
+    if (inner && inner.get && inner.set) Object.defineProperty(Element.prototype, 'innerHTML', {
+      configurable:true, enumerable:inner.enumerable,
+      get:function () { return inner.get.call(this); },
+      set:function (value) { return inner.set.call(this, fixMarkup(value)); }
+    });
+  } catch (e) {}
+  try {
+    var originalSet = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function (name, value) {
+      if (/^(src|href|poster|data-src)$/i.test(name)) value = resolveAsset(value);
+      return originalSet.call(this, name, value);
+    };
+  } catch (e) {}
   var mk = function () { var m = new Map(); return { get length() { return m.size; }, key: function (i) { var a = Array.from(m.keys()); return i < a.length ? a[i] : null; }, getItem: function (k) { k = String(k); return m.has(k) ? m.get(k) : null; }, setItem: function (k, v) { m.set(String(k), String(v)); }, removeItem: function (k) { m.delete(String(k)); }, clear: function () { m.clear(); } }; };
   ['localStorage', 'sessionStorage'].forEach(function (n) { try { Object.defineProperty(window, n, {configurable:true, value:mk()}); } catch (e) {} });
   try { var ck = ''; Object.defineProperty(document, 'cookie', {configurable:true, get:function () { return ck; }, set:function (v) { ck += (ck ? '; ' : '') + String(v).split(';')[0]; }}); } catch (e) {}
@@ -727,8 +771,11 @@ function build(f, sub) {
     const fcss = assetFor(href, h.name);
     if (fcss && ext(fname(fcss)) === 'css') {
       const css = rewriteCss(fcss.content || '', fcss.name, urlOf, missing);
-      const u = URL.createObjectURL(new Blob([css], {type:'text/css;charset=utf-8'})); previewUrls.push(u);
-      el.setAttribute('href', u);
+      const style = doc.createElement('style');
+      style.textContent = css;
+      if (el.media) style.media = el.media;
+      if (el.title) style.title = el.title;
+      el.replaceWith(style);
     } else if (!fcss) missing.add(href);
   });
   doc.querySelectorAll('style').forEach(el => { el.textContent = rewriteCss(el.textContent, h.name, urlOf, missing); });
@@ -745,8 +792,22 @@ function build(f, sub) {
     const src = el.getAttribute('src') || '';
     if (/^(https?:|\/\/|data:|blob:)/i.test(src)) return;
     const js = assetFor(src, h.name);
-    if (js && !js.data) el.setAttribute('src', urlOf(js));
-    else if (!js) missing.add(src);
+    if (js && !js.data) {
+      const script = doc.createElement('script');
+      Array.from(el.attributes).forEach(a => {
+        const name = a.name.toLowerCase();
+        if (name !== 'src' && name !== 'integrity' && name !== 'crossorigin') script.setAttribute(a.name, a.value);
+      });
+      let code = js.content || '';
+      if (['js','mjs'].includes(ext(fname(js)))) code = rewriteJs(code, js.name, urlOf, missing);
+      if (el.hasAttribute('defer') && !el.hasAttribute('type')) {
+        script.textContent = 'document.addEventListener("DOMContentLoaded",function(){\\n' + code + '\\n});';
+      } else {
+        script.textContent = code;
+      }
+      script.textContent = script.textContent.replace(/<\/script/gi, '<\\/script');
+      el.replaceWith(script);
+    } else if (!js) missing.add(src);
   });
 
   // Imágenes, iconos, vídeos, audio, iframes y enlaces a otros archivos del mismo proyecto.
@@ -780,7 +841,15 @@ function build(f, sub) {
 
   // Reescribe recursos CSS inline que aparezcan en atributos style.
   doc.querySelectorAll('[style]').forEach(el => el.setAttribute('style', rewriteCss(el.getAttribute('style'), h.name, urlOf, missing)));
-  const bridge = '<script>(' + previewBridge.toString() + ')()<\/script>';
+  const dynamicAssets = {};
+  files.forEach(x => {
+    if (!x.data || !IMG[ext(fname(x))]) return;
+    const full = clean(x.name).replace(/^\/+/, '').toLowerCase();
+    const base = full.split('/').pop();
+    dynamicAssets[full] = x.data;
+    if (!dynamicAssets[base]) dynamicAssets[base] = x.data;
+  });
+  const bridge = '<script>(' + previewBridge.toString() + ')(' + JSON.stringify(dynamicAssets) + ')<\/script>';
   const map = importMap();
   const head = doc.head || doc.documentElement.insertBefore(doc.createElement('head'), doc.body || null);
   // Al PRINCIPIO del head: así el almacenamiento y la navegación segura existen antes que cualquier script de la página
@@ -795,11 +864,27 @@ function build(f, sub) {
   return '<!doctype html>\n' + doc.documentElement.outerHTML;
 }
 let expectLoads = 0, pendingRevoke = [], recoverT = [];
+// Los recursos Blob pueden seguir siendo solicitados después del evento load
+// (módulos, CSS, fuentes e imágenes diferidas). No revocarlos al cargar el
+// documento: hacerlo inmediatamente rompe las rutas locales del proyecto.
+function deferOldPreviewUrls(urls) {
+  if (!urls || !urls.length) return;
+  const old = urls.slice();
+  setTimeout(() => {
+    // Solo se liberan URLs de generaciones anteriores; las actuales siguen vivas.
+    const active = new Set(previewUrls);
+    old.forEach(u => {
+      if (!active.has(u)) {
+        try { URL.revokeObjectURL(u); } catch (_) {}
+      }
+    });
+    pendingRevoke = pendingRevoke.filter(u => !old.includes(u));
+  }, 120000);
+}
 function setPrev(html) { expectLoads++; prev.srcdoc = html; }
 prev.addEventListener('load', () => {
   if (expectLoads > 0) {
     expectLoads--;
-    if (!expectLoads) { pendingRevoke.forEach(u => { try { URL.revokeObjectURL(u); } catch (_) {} }); pendingRevoke = []; }
     return;
   }
   // La página de la vista previa se recargó o navegó sola: se restaura sin tocar los archivos
@@ -811,8 +896,12 @@ prev.addEventListener('load', () => {
 });
 function refresh(f) {
   building.clear();
-  pendingRevoke = pendingRevoke.concat(previewUrls); previewUrls = [];
-  setPrev(build(f));
+  const previous = previewUrls.slice();
+  pendingRevoke = pendingRevoke.concat(previous);
+  previewUrls = [];
+  const html = build(f);
+  setPrev(html);
+  deferOldPreviewUrls(previous);
 }
 function previewNav(h) {
   const raw = String(h || '').trim(); let x = null;
