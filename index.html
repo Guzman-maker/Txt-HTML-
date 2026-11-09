@@ -87,11 +87,12 @@ button.wide{width:100%}
   <div id="tabs" class="tabs"></div>
   <div class="toolbar">
     <label class="file-label" for="fileInput">Abrir archivos</label>
-    <input id="fileInput" type="file" multiple>
+    <input id="fileInput" type="file" multiple accept=".html,.htm,.css,.js,.mjs,.py,.java,.json,.md,.txt,.xml,.csv,.sql,.yml,.yaml,.svg,.png,.jpg,.jpeg,.gif,.webp,.avif,.bmp,.ico">
     <label class="file-label" for="folderInput">Abrir carpeta</label>
-    <input id="folderInput" type="file" webkitdirectory directory multiple>
+    <input id="folderInput" type="file" webkitdirectory directory multiple accept=".html,.htm,.css,.js,.mjs,.py,.java,.json,.md,.txt,.xml,.csv,.sql,.yml,.yaml,.svg,.png,.jpg,.jpeg,.gif,.webp,.avif,.bmp,.ico">
     <button id="dlBtn" class="primary" type="button">↓ Descargar</button>
     <button id="runBtn" type="button">▶ Ejecutar</button>
+    <button id="viewBtn" type="button">Ver código</button>
     <button id="renBtn" type="button">Renombrar</button>
     <button id="delBtn" type="button">Borrar</button>
     <button id="delAllBtn" type="button">Borrar todo</button>
@@ -212,13 +213,13 @@ const find = n => files.find(f => f.name === n);
 const clean = n => (n || '').replace(/\\/g, '/').split('/').map(x => x.trim()).filter(x => x && x !== '.' && x !== '..').join('/');
 
 // ---------- Estado ----------
-files = [{name:'sin-titulo', content:''}];
+files = [];
 // Guardado persistente (IndexedDB): si la página se recarga, los archivos se restauran
 const idb = () => new Promise((ok, no) => { try { const r = indexedDB.open('editor-movil', 1); r.onupgradeneeded = () => r.result.createObjectStore('p'); r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); } catch (e) { no(e); } });
 const idbSet = async v => { try { const d = await idb(); d.transaction('p', 'readwrite').objectStore('p').put(v, 'proyecto'); } catch (_) {} };
 const idbGet = async () => { try { const d = await idb(); return await new Promise(ok => { const q = d.transaction('p').objectStore('p').get('proyecto'); q.onsuccess = () => ok(q.result); q.onerror = () => ok(null); }); } catch (_) { return null; } };
 const save = () => { if (typeof flushNow === 'function') flushNow(); };
-const flushNow = () => { const blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content; idbSet(blank ? null : {files, cur}); };
+const flushNow = () => { const blank = files.length === 0; idbSet(blank ? null : {files, cur}); };
 addEventListener('pagehide', () => flushNow());
 document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'hidden') flushNow(); });
 addEventListener('beforeunload', e => { if (files.some(f => f.content)) { e.preventDefault(); e.returnValue = ''; } });
@@ -227,7 +228,9 @@ addEventListener('unhandledrejection', e => log('Error: ' + ((e.reason && e.reas
 const saveD = deb(save, 300);
 function note(m) { const t = $('toast'); t.textContent = m; t.classList.remove('hidden'); clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 2400); }
 function head() {
-  const f = file(), k = kind(f);
+  const f = file();
+  if (!f) { $('fileName').textContent = 'Sin archivos abiertos'; $('lang').textContent = 'Proyecto vacío'; $('count').textContent = '0 archivos'; return; }
+  const k = kind(f);
   $('fileName').textContent = fname(f);
   $('lang').textContent = f.data ? 'Imagen' : (!ext(f.name) || ext(f.name) === 'txt') && !code.value.trim() ? 'Detectando…' : (LANG[k] || k.toUpperCase());
   const n = code.value ? code.value.split('\n').length : 0;
@@ -245,23 +248,26 @@ function render() {
     b.onclick = () => { cur = i; render(); save(); };
     return b;
   }));
-  const im = !!file().data;
+  const active = file(), im = !!(active && active.data);
   code.classList.toggle('hidden', im); $('gut').classList.toggle('hidden', im); $('imgv').classList.toggle('hidden', !im);
-  if (im) $('imgv').firstElementChild.src = file().data;
-  code.value = file().content; fileList(); head(); lintNow(); auto();
+  code.disabled = !!im;
+  if (im) $('imgv').firstElementChild.src = active.data;
+  else $('imgv').firstElementChild.removeAttribute('src');
+  code.value = active && !im ? active.content : '';
+  fileList(); head();
+  if (active) lintNow(); else { marks = {}; gutter(); $('tips').replaceChildren(); $('tipN').textContent = ''; }
+  auto();
 }
 let bulk = false;
-const isBlank = () => files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content && !files[0].data;
+const isBlank = () => files.length === 0;
 function removeAt(i) {
   files.splice(i, 1);
-  if (!files.length) files.push({name:'sin-titulo', content:''});
-  cur = Math.max(0, Math.min(cur > i ? cur - 1 : cur, files.length - 1));
+  cur = files.length ? Math.max(0, Math.min(cur > i ? cur - 1 : cur, files.length - 1)) : 0;
   render(); save();
 }
 function removeMany(pred) {
   files = files.filter(f => !pred(f));
-  if (!files.length) files.push({name:'sin-titulo', content:''});
-  cur = Math.min(cur, files.length - 1); render(); save();
+  cur = files.length ? Math.min(cur, files.length - 1) : 0; render(); save();
 }
 function fileList() {
   const body = $('flBody'), blank = isBlank();
@@ -279,7 +285,12 @@ function fileList() {
     if (d !== dir) { dir = d; if (d) out.push(row('fl-dir', '📁 ' + d + '/', () => {}, () => { if (confirm('¿Borrar la carpeta ' + d + ' y todo su contenido?')) removeMany(g => g.name.startsWith(d + '/')); }, false)); }
     out.push(row('', (d ? '   ' : '') + parts[parts.length - 1], () => { cur = i; render(); save(); }, () => { if (confirm('¿Borrar ' + f.name + '?')) removeAt(i); }, i === cur));
   });
-  body.replaceChildren(...(blank ? [] : out));
+  if (blank) {
+    const empty = document.createElement('div');
+    empty.className = 'mut'; empty.style.padding = '10px';
+    empty.textContent = 'No hay archivos. Puedes abrir varios archivos o importar una carpeta completa.';
+    body.replaceChildren(empty);
+  } else body.replaceChildren(...out);
 }
 function add(name, content = '', extra) {
   name = clean(name) || 'sin-nombre'; let n = name, i = 2;
@@ -537,6 +548,7 @@ function lint(f) {
   return t;
 }
 function lintNow() {
+  if (!file()) { marks = {}; gutter(); $('tipN').textContent = ''; $('tips').replaceChildren(); return; }
   const t = lint(file()); marks = {};
   t.forEach(x => { if (x.l && marks[x.l] !== 'err') marks[x.l] = x.k; }); gutter();
   $('tipN').textContent = t.length ? '(' + t.length + ')' : '';
@@ -882,7 +894,7 @@ function npm(a) {
 async function run(n) { try { await run_(n); } catch (e) { show('term'); log(String(e.message || e), 'err'); } }
 async function run_(n) {
   const f = n ? find(n) : file();
-  if (!f) return log('No existe: ' + n, 'err');
+  if (!f) return log(n ? 'No existe: ' + n : 'No hay archivos para ejecutar.', 'err');
   if (f.data) { show('prev'); setPrev('<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%">'); return; }
   const k = kind(f);
   if (k === 'html' || k === 'css') { show('prev'); refresh(f); }
@@ -934,7 +946,12 @@ code.addEventListener('keydown', e => {
   else if (s === t && v[s] === e.key && ')]}"\'`'.includes(e.key)) { e.preventDefault(); code.setSelectionRange(s + 1, s + 1); }
   else if (s === t && PAIR[e.key] && !(/['"`]/.test(e.key) && /\w/.test(v[s - 1] || ''))) { e.preventDefault(); ins(e.key + PAIR[e.key]); code.setSelectionRange(s + 1, s + 1); }
 });
-code.addEventListener('input', () => { file().content = code.value; saveD(); head(); lintD(); auto(); if ((code.value ? code.value.split('\n').length : 1) !== gutN) gutter(); });
+code.addEventListener('input', () => {
+  if (!file()) { files.push({name:'sin-titulo.py', content:''}); cur = 0; }
+  file().content = code.value; saveD(); head(); lintD(); auto();
+  if ((code.value ? code.value.split('\n').length : 1) !== gutN) gutter();
+  fileList();
+});
 code.addEventListener('scroll', () => { $('gut').scrollTop = code.scrollTop; });
 
 // ---------- Botones ----------
@@ -942,6 +959,8 @@ async function load(list) {
   const msgs = [], blank = isBlank();
   bulk = true;
   for (const f of list) {
+    // Conserva la ruta relativa para que HTML, CSS, JS e imágenes sigan
+    // encontrándose entre sí al previsualizar el proyecto completo.
     let n = clean(f.webkitRelativePath ? f.webkitRelativePath.replace(/^[^/]+\//, '') : f.name);
     try {
       if (IMG[ext(n)]) {
@@ -955,11 +974,27 @@ async function load(list) {
     } catch (_) { msgs.push('No se pudo leer ' + n); }
   }
   bulk = false;
-  if (blank && files.length > 1) { files.shift(); }
-  cur = Math.max(0, Math.min(blank ? 0 : cur, files.length - 1));
-  if (list.length) { $('flist').open = list.length > 1; }
-  render(); save();
-  note(msgs.length ? msgs.join(' · ') : list.length + ' archivo(s) cargados');
+
+  // No insertar ni eliminar archivos ficticios: todos los elementos importados
+  // permanecen en el proyecto y el usuario puede borrarlos todos cuando quiera.
+  if (blank) {
+    const main = files.findIndex(x => clean(x.name).toLowerCase() === 'index.html')
+      >= 0 ? files.findIndex(x => clean(x.name).toLowerCase() === 'index.html')
+      : files.findIndex(x => kind(x) === 'html');
+    cur = main >= 0 ? main : (files.length ? 0 : 0);
+  } else {
+    cur = files.length ? Math.max(0, Math.min(cur, files.length - 1)) : 0;
+  }
+  if (list.length) $('flist').open = list.length > 1;
+  render();
+  save();
+  if (blank && files.some(x => kind(x) === 'html')) {
+    show('prev');
+    refresh(files[cur]);
+    note('Proyecto importado: ' + files.length + ' archivo(s). Vista previa del HTML principal.');
+  } else {
+    note(msgs.length ? msgs.join(' · ') : list.length + ' archivo(s) cargados');
+  }
 }
 $('fileInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
 $('folderInput').onchange = async e => { const l = Array.from(e.target.files); e.target.value = ''; await load(l); };
@@ -971,9 +1006,17 @@ $('exeZip').onclick = dlExePackage;
 $('dlSheet').onclick = e => { if (e.target === $('dlSheet')) closeDl(); };
 addEventListener('keydown', e => { if (e.key === 'Escape') { closeDl(); if ($('p-prev').classList.contains('full')) $('fullBtn').click(); } });
 $('runBtn').onclick = () => run();
-$('renBtn').onclick = () => { const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
+$('viewBtn').onclick = () => {
+  const f = file();
+  if (!f) return note('No hay archivo seleccionado');
+  if (f.data) { show('prev'); setPrev('<body style="margin:0;background:#111;display:grid;place-items:center;min-height:100vh"><img src="' + f.data + '" style="max-width:100%;max-height:100vh">'); return; }
+  const safe = f.content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  show('prev');
+  setPrev('<!doctype html><meta charset="utf-8"><body style="margin:0;background:#0b1020;color:#e8eef9;padding:16px"><div style="font:13px system-ui;color:#9eacc4;margin-bottom:10px">' + fname(f).replace(/</g,'&lt;') + ' · ' + (LANG[kind(f)] || kind(f).toUpperCase()) + '</div><pre style="white-space:pre;overflow:auto;font:14px/1.55 ui-monospace,monospace">' + safe + '</pre></body>');
+};
+$('renBtn').onclick = () => { if (!file()) return note('No hay archivo seleccionado'); const n = clean(prompt('Nuevo nombre', file().name)); if (n) { file().name = n; render(); save(); } };
 $('delBtn').onclick = () => {
-  if (isBlank()) return note('Ya está vacío: escribe aquí o abre un archivo');
+  if (!file()) return note('No hay archivos para borrar');
   if (confirm('¿Borrar ' + file().name + '?')) removeAt(cur);
 };
 $('delAllBtn').onclick = () => {
@@ -992,7 +1035,7 @@ document.addEventListener('touchmove', e => { if (e.touches && e.touches.length 
 log('Terminal lista. Escribe help.');
 render(); show('prev');
 idbGet().then(st => {
-  const blank = files.length === 1 && files[0].name === 'sin-titulo' && !files[0].content;
+  const blank = files.length === 0;
   if (st && Array.isArray(st.files) && st.files.length && blank) {
     files = st.files; cur = Math.min(st.cur || 0, files.length - 1);
     render(); note('Archivos restaurados');
